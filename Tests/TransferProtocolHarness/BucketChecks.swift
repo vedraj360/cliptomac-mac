@@ -1,0 +1,56 @@
+import Foundation
+
+extension Harness {
+    @MainActor static func bucketChecks() async throws {
+        let payload = Data(repeating: 0x5A, count: TransferManifest.bucketBytes + 321)
+        let manifest = TransferManifest(protocolVersion: 2, transferId: "bucket-fixture", size: Int64(payload.count), bucketSize: TransferManifest.bucketBytes, sha256: TransferVerifier.digest(payload), kind: "file", mimeType: "application/octet-stream", name: "fixture.bin", app: "Test", package: "test", timestamp: 1)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("bucket-storage-check-\(UUID().uuidString)")
+        let destination = root.appendingPathComponent("finished")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let storage = BucketTransferStorage(root: root)
+        _ = try storage.start(manifest, owner: "a")
+        let first = payload.prefix(manifest.bucketSize)
+        try storage.put(owner: "a", id: manifest.transferId, index: 0, bytes: Data(first), checksum: TransferVerifier.digest(Data(first)))
+        let reloaded = BucketTransferStorage(root: root)
+        let receipt = try reloaded.start(manifest, owner: "a")
+        precondition(receipt["received"] as? [Int] == [0], "bucket receipt did not survive restart")
+        try reloaded.put(owner: "a", id: manifest.transferId, index: 0, bytes: Data(first), checksum: TransferVerifier.digest(Data(first)))
+        do { try reloaded.put(owner: "a", id: manifest.transferId, index: 1, bytes: Data([1]), checksum: "bad"); fatalError("bad checksum accepted") } catch {}
+        do { _ = try reloaded.complete(owner: "a", id: manifest.transferId, destination: destination); fatalError("incomplete transfer finalized") } catch {}
+        do { try reloaded.put(owner: "b", id: manifest.transferId, index: 0, bytes: Data(first), checksum: TransferVerifier.digest(Data(first))); fatalError("receipt leaked across owners") } catch {}
+        let last = Data(payload.suffix(321))
+        try reloaded.put(owner: "a", id: manifest.transferId, index: 1, bytes: last, checksum: TransferVerifier.digest(last))
+        let (_, file) = try reloaded.complete(owner: "a", id: manifest.transferId, destination: destination)
+        let verifiedHash = try TransferVerifier.digest(file: file)
+        precondition(verifiedHash == manifest.sha256)
+        let (_, retriedFile) = try BucketTransferStorage(root: root).complete(owner: "a", id: manifest.transferId, destination: destination)
+        precondition(file == retriedFile, "retry created a second completed file")
+        let sparse = TransferManifest(protocolVersion: 2, transferId: "offset-over-5gib", size: 5 * 1024 * 1024 * 1024 + 123, bucketSize: TransferManifest.bucketBytes, sha256: String(repeating: "0", count: 64), kind: "file", mimeType: "application/octet-stream", name: "large.bin", app: "Test", package: "test", timestamp: 1)
+        _ = try storage.start(sparse, owner: "a")
+        let tail = Data(repeating: 77, count: 123)
+        try storage.put(owner: "a", id: sparse.transferId, index: sparse.bucketCount - 1, bytes: tail, checksum: TransferVerifier.digest(tail))
+        let largeReceipt = try storage.start(sparse, owner: "a")
+        precondition(largeReceipt["received"] as? [Int] == [640], "64-bit bucket offset failed")
+        try storage.cancel(owner: "a", id: sparse.transferId)
+
+        @Sendable func request(_ method: String, _ path: String, _ data: Data = Data(), token: String = "token-a", checksum: String? = nil) async throws -> Data {
+            let extra = checksum.map { "X-Bucket-SHA256: \($0)\r\n" } ?? ""
+            let head = Data("\(method) \(path) HTTP/1.1\r\nHost: localhost\r\nX-ClipToMac-Token: \(token)\r\n\(extra)Content-Length: \(data.count)\r\n\r\n".utf8)
+            return try await requestAsync(head + data)
+        }
+        let meta = try JSONEncoder().encode(manifest)
+        let created = try await request("POST", "/buckets/start", meta)
+        precondition(status(created) == 200)
+        async let a = request("PUT", "/buckets/bucket-fixture/0", Data(first), checksum: TransferVerifier.digest(Data(first)))
+        async let b = request("PUT", "/buckets/bucket-fixture/1", last, checksum: TransferVerifier.digest(last))
+        let results = try await [a, b]
+        precondition(results.allSatisfy { status($0) == 200 }, "parallel bucket upload failed")
+        let leaked = try await request("PUT", "/buckets/bucket-fixture/1", last, token: "token-b", checksum: TransferVerifier.digest(last))
+        precondition(status(leaked) == 400, "cross-device bucket accepted")
+        let complete = try await request("POST", "/buckets/bucket-fixture/complete")
+        precondition(status(complete) == 200, "bucket commit failed")
+        let repeated = try await request("POST", "/buckets/bucket-fixture/complete")
+        precondition(status(repeated) == 200, "commit retry was not idempotent")
+        print("PASS buckets: parallel HTTP upload, checksums, restart resume, duplicate receipts/commit, device isolation, missing-bucket rejection, >5 GiB sparse offset")
+    }
+}

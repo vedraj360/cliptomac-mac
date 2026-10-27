@@ -1,0 +1,12 @@
+.DS_Store
+*.log
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+.env
+.env.*
+ClipToMac.app/
+.build/
