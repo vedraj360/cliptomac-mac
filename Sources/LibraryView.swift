@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 private enum LibraryFilter: Hashable { case all, pinned, sent, received, text, images, files, collection(String), app(KnownApp) }
 
 struct LibraryView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @ObservedObject private var store = ClipStore.shared
     @ObservedObject private var transfers = MacTransferService.shared
     @State private var confirmingDelete = false
@@ -33,9 +34,9 @@ struct LibraryView: View {
             sidebar.frame(width: 220)
             Rectangle().fill(.primary.opacity(0.08)).frame(width: 1)
             VStack(spacing: 0) {
-                topBar
+                topBar.zIndex(1)
                 Rectangle().fill(.primary.opacity(0.08)).frame(height: 1)
-                if settings { settingsPane } else { contentPane }
+                Group { if settings { settingsPane } else { contentPane } }.clipped()
             }
         }
         .font(.system(size: 13))
@@ -124,7 +125,11 @@ struct LibraryView: View {
                 Menu { ForEach(store.pairedDevices) { device in Button(device.name) { sendSelected(to: device) } } } label: { Image(systemName: "paperplane") }.disabled(selected.isEmpty || store.pairedDevices.isEmpty).help("Send selected clips to a paired phone").menuStyle(.borderlessButton)
                 Menu { ForEach(store.pairedDevices) { device in Button("Choose file for \(device.name)") { selectedDevice=device; showFilePicker=true } } } label:{ Image(systemName:"plus") }.help("Choose a file to send to a phone").menuStyle(.borderlessButton).disabled(store.pairedDevices.isEmpty)
             } else { Button("Done"){settings=false}.buttonStyle(.bordered) }
-        }.padding(.horizontal,22).padding(.vertical,16)
+        }
+        .padding(.horizontal,22).padding(.vertical,16)
+        .frame(maxWidth: .infinity)
+        .background(colorScheme == .dark ? Color(red: 0.10, green: 0.115, blue: 0.13) : Color(nsColor: .windowBackgroundColor))
+        .overlay(alignment: .bottom) { Rectangle().fill(.primary.opacity(0.12)).frame(height: 1) }
     }
     private var title:String { switch filter {case .all:return "All Clips";case .pinned:return "Pinned";case .sent:return "Sent";case .received:return "Received";case .text:return "Text";case .images:return "Images";case .files:return "Files";case .collection(let n):return n;case .app(let a):return a.rawValue} }
     private var contentPane: some View {

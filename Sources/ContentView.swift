@@ -123,6 +123,19 @@ public struct ContentView: View {
                 .help("Open your full clip library")
                 .accessibilityLabel("Open full clip library")
             }.help(store.connectionExplanation)
+            if !settings && (store.connectionState() == .unpaired || store.connectionState() == .securePairingRequired) {
+                Button {
+                    store.updateLocalIP()
+                    settings = true
+                    SecurePairing.shared.open(host: store.localIP, port: store.port)
+                } label: {
+                    Label(store.connectionState() == .unpaired ? "Pair phone" : "Pair securely", systemImage: "qrcode")
+                        .font(.system(size: 12, weight: .semibold))
+                        .frame(maxWidth: .infinity).padding(.vertical, 5)
+                }
+                .buttonStyle(.borderedProminent)
+                .help("Open a fresh QR to pair your phone")
+            }
         }
         .padding(20)
     }

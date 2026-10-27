@@ -88,3 +88,13 @@ A saved device record no longer means “connected.” The menu header/footer di
 Android foreground checks use the pairing token, recognize rejected pairings, and refresh activity every 20 seconds while foreground/idle; ordinary transfer/inbox traffic refreshes Mac presence as well. Missing enrollment is described as a pairing requirement rather than an unavailable Mac.
 
 State/expiry/unpair regression tests and invalid-token ping tests passed. The Mac status update was compiled separately without using a developer certificate. Deployment of the next Mac build remains pending the user's signing choice.
+
+## Pairing and scrolling UI follow-up
+
+- Menu panel now activates on open, uses an explicit hit-testable backing beneath glass and routes wheel events to its own scroll view. Header/padding/scroll-limit events are contained; scrolling outside the window is untouched. MenuInputHarness validates routing without global input injection.
+- QR shows a live 2:00 countdown. Common run-loop mode keeps the ticker updating while scrolling. Both monotonic and wall-clock limits are checked, including after sleep; expiry removes the old QR and offers Generate new QR. Copy rechecks validity, cancel clears the enrollment, and expired/consumed nonces cannot be reused. Tests advance an isolated clock through the expiry boundary, regeneration and cancellation. QR rendering is isolated from one-second countdown updates.
+- Android uses an app-owned portrait QR-only capture screen: square guide, no barcode laser, clear Mac instructions, Close, and flashlight control only where hardware supports it. Existing camera permission/lifecycle/result handling remains provided by CaptureManager. Two physical-device tests passed, including actual portrait layout/square frame and private activity declaration.
+- Library titlebar/header has a dedicated readable backdrop and divider; clip content is clipped below it.
+- Home shows Pair phone or Pair securely when enrollment is missing/legacy; one click opens a fresh QR. Already-paired devices are not prompted to pair as a connection repair.
+
+Both builds and Android lint passed. Mac updates are local ad-hoc builds, without use of the user's developer certificate. Native WindowServer scroll behavior still requires the user's physical check; the input-routing regression test covers the application-side behavior.

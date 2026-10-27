@@ -15,6 +15,22 @@ import CryptoKit
         try PrivateAppStorage.write(credentials.certificate, to: root.appendingPathComponent("certificate.der"))
         let base64 = credentials.certificate.base64EncodedString(options: [.lineLength64Characters, .endLineWithLineFeed])
         try PrivateAppStorage.write(Data(("-----BEGIN CERTIFICATE-----\n" + base64 + "\n-----END CERTIFICATE-----\n").utf8), to: root.appendingPathComponent("certificate.pem"))
+        var now: TimeInterval = 100
+        let enrollment = SecurePairing(clock: { now })
+        enrollment.open(host: "127.0.0.1", port: 15769, identity: identity)
+        let initialPayload = enrollment.payload!
+        let initial = try JSONSerialization.jsonObject(with: Data(initialPayload.utf8)) as! [String: Any]
+        let previousNonce = initial["nonce"] as! String
+        precondition(enrollment.remainingSeconds == 120)
+        now = 219.1; enrollment.refreshRemaining()
+        precondition(enrollment.remainingSeconds == 1 && !enrollment.expired)
+        now = 220; enrollment.refreshRemaining()
+        precondition(enrollment.expired && enrollment.payload == nil && !enrollment.consume(previousNonce))
+        enrollment.open(host: "127.0.0.1", port: 15769, identity: identity)
+        precondition(!enrollment.expired && enrollment.remainingSeconds == 120 && enrollment.payload != initialPayload)
+        precondition(!enrollment.consume(previousNonce))
+        enrollment.close(); precondition(enrollment.payload == nil && !enrollment.expired)
+        print("PASS QR countdown: exact expiry, expired nonce rejection, fresh generation, cancel")
         let legacy = PairedDevice(id: "legacy-phone", name: "Legacy", token: "legacy-token", securePairing: false)
         ClipStore.shared.pairedDevices = [legacy]
         SecurePairing.shared.open(host: "127.0.0.1", port: 15769, identity: identity)

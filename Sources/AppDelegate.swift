@@ -2,22 +2,6 @@ import Foundation
 import AppKit
 import SwiftUI
 
-/// A transparent menu-bar panel avoids stacking the popover's opaque material
-/// under the native clear-glass surface supplied by ContentView.
-final class GlassMenuPanel: NSPanel {
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { false }
-    override func cancelOperation(_ sender: Any?) {
-        if NSApp.modalWindow === self { NSApp.stopModal(withCode: .cancel) }
-        else { orderOut(nil) }
-    }
-}
-
-final class TransparentHostingView<Content: View>: NSHostingView<Content> {
-    override var isOpaque: Bool { false }
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-}
-
 @MainActor
 public class AppDelegate: NSObject, NSApplicationDelegate {
     public static weak var shared: AppDelegate?
@@ -33,9 +17,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         UDPDiscoveryServer.shared.start(port: 5679)
         ShortcutManager.shared.register()
         panel = GlassMenuPanel(contentRect: NSRect(x: 0, y: 0, width: 420, height: 620),
-            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+            styleMask: [.borderless], backing: .buffered, defer: false)
         panel.isOpaque = false
-        panel.backgroundColor = .clear
+        panel.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.02)
+        panel.ignoresMouseEvents = false
+        panel.acceptsMouseMovedEvents = true
+        panel.becomesKeyOnlyIfNeeded = false
         panel.hasShadow = true
         panel.level = .popUpMenu
         panel.hidesOnDeactivate = false
@@ -75,7 +62,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             window.isReleasedWhenClosed = false
             window.isOpaque = false
             window.backgroundColor = .clear
-            window.titlebarAppearsTransparent = true
+            window.titlebarAppearsTransparent = false
             window.contentView = TransparentHostingView(rootView: LibraryView())
             window.center()
             libraryWindow = window
@@ -94,6 +81,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         let x = min(max(anchor.midX - panel.frame.width / 2, visible.minX + 8), visible.maxX - panel.frame.width - 8)
         let y = max(visible.minY + 8, anchor.minY - panel.frame.height - 7)
         panel.setFrameOrigin(NSPoint(x: x, y: y))
+        NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
         NotificationCenter.default.post(name: Notification.Name("ClipToMacMenuOpened"), object: nil)
     }
