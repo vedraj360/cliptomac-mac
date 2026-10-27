@@ -37,7 +37,7 @@ extension HTTPServer {
                     await MainActor.run { MacTransferService.shared.incomingState(owner: owner, transferID: pieces[1], state: "verifying") }
                     let (manifest, file) = try BucketTransferStorage.shared.complete(owner: owner, id: pieces[1], destination: destination)
                     let saved = await MainActor.run { () -> Bool in
-                        guard ClipStore.shared.pairedDevices.contains(where: { $0.id == owner && $0.token == device.token }) else { return false }
+                        guard ClipStore.shared.pairedDevices.contains(where: { $0.securePairing == true && $0.id == owner && $0.token == device.token }) else { return false }
                         let scopedID = String(TransferVerifier.digest(Data(owner.utf8)).prefix(16)) + "-" + manifest.transferId
                         if ClipStore.shared.seenTransferAttempt(scopedID) { return true }
                         return ClipStore.shared.addTransferredItem(id: scopedID, text: "", appName: manifest.app, packageName: manifest.package, timestamp: Date(timeIntervalSince1970: Double(manifest.timestamp) / 1000), kind: manifest.kind, mimeType: manifest.mimeType, attachmentName: manifest.name, attachmentPath: file.path, direction: "received", sourceDeviceId: owner, contentHash: manifest.sha256)

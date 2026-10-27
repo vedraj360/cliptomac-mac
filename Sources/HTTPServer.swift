@@ -1,9 +1,13 @@
 import Foundation
 import AppKit
 import CryptoKit
+import Network
+import Security
 
 public final class HTTPServer {
     public static let shared = HTTPServer()
+    private var tlsListener: NWListener?
+    private var tlsBridges: [UUID: TLSSocketBridge] = [:]
     private var serverFd: Int32 = -1
     private var isRunning = false
     private let queue = DispatchQueue(label: "com.vdx.cliptomac.server", qos: .userInitiated)
@@ -13,6 +17,44 @@ public final class HTTPServer {
     private let maxBody = 25 * 1024 * 1024
 
     public func start(port: Int = 5678) {
+        #if CLIPTOMAC_TRANSFER_TEST
+        startTestHTTP(port: port)
+        #else
+        do { try startTLS(port: port) }
+        catch { Task { @MainActor in SecurePairing.shared.error = "Secure server could not start. Unlock your Keychain and restart ClipToMac." } }
+        #endif
+    }
+
+    func startTLS(port: Int, identity: TLSIdentity = .shared) throws {
+        let credentials = try identity.load()
+        let tls = NWProtocolTLS.Options()
+        sec_protocol_options_set_min_tls_protocol_version(tls.securityProtocolOptions, .TLSv12)
+        guard let localIdentity = sec_identity_create(credentials.identity), let rawPort = UInt16(exactly: port), rawPort > 0, let endpoint = NWEndpoint.Port(rawValue: rawPort) else { throw TLSIdentity.TLSError.identity }
+        sec_protocol_options_set_local_identity(tls.securityProtocolOptions, localIdentity)
+        let parameters = NWParameters(tls: tls, tcp: NWProtocolTCP.Options())
+        parameters.allowLocalEndpointReuse = true
+        let listener = try NWListener(using: parameters, on: endpoint)
+        tlsListener = listener
+        listener.stateUpdateHandler = { state in
+            if case .failed = state { Task { @MainActor in SecurePairing.shared.error = "Secure server could not listen on this port. Restart ClipToMac after closing other copies." } }
+        }
+        listener.newConnectionHandler = { [weak self] connection in
+            guard let self, self.connectionSlots.wait(timeout: .now()) == .success else { connection.cancel(); return }
+            var pair: [Int32] = [-1, -1]
+            guard socketpair(AF_UNIX, SOCK_STREAM, 0, &pair) == 0 else { self.connectionSlots.signal(); connection.cancel(); return }
+            let id = UUID()
+            let bridge = TLSSocketBridge(connection: connection, fd: pair[1]) { [weak self] in
+                self?.queue.async { self?.tlsBridges.removeValue(forKey: id) }
+            }
+            self.tlsBridges[id] = bridge; bridge.start()
+            let parserFD = pair[0]
+            DispatchQueue.global(qos: .userInitiated).async { self.handleClient(parserFD) }
+        }
+        listener.start(queue: queue)
+    }
+
+    #if CLIPTOMAC_TRANSFER_TEST
+    private func startTestHTTP(port: Int) {
         guard !isRunning else { return }
         queue.async { [weak self] in
             guard let self else { return }
@@ -33,7 +75,11 @@ public final class HTTPServer {
         }
     }
 
-    public func stop() { isRunning = false; if serverFd >= 0 { close(serverFd); serverFd = -1 } }
+    #endif
+
+    public func stop() {
+        queue.async { self.tlsListener?.cancel(); self.tlsListener = nil; let bridges = Array(self.tlsBridges.values); bridges.forEach { $0.stop() }; self.tlsBridges.removeAll() }
+        isRunning = false; if serverFd >= 0 { close(serverFd); serverFd = -1 } }
 
     struct Request { var method: String; var path: String; var headers: [String: String]; var body: Data }
 
@@ -92,7 +138,7 @@ public final class HTTPServer {
         if req.method == "OPTIONS" { respond(fd, 403, ["error": "Browser requests are not allowed"]); return }
         if req.method == "GET" && (req.path == "/ping" || req.path == "/") {
             let store = ClipStore.shared
-            respond(fd, 200, ["status": "ok", "service": "ClipToMac", "device": Host.current().localizedName ?? "MacBook", "isPaired": store.hasPairedDevices, "transferProtocol": 2]); return
+            respond(fd, 200, ["status": "ok", "service": "ClipToMac", "device": Host.current().localizedName ?? "MacBook", "isPaired": store.hasPairedDevices, "transferProtocol": 2, "securityProtocol": 3]); return
         }
         if req.method == "POST" && req.path == "/pair/request" {
             guard let obj = try? JSONSerialization.jsonObject(with: req.body) as? [String: Any] else { respond(fd, 400, ["error": "Invalid JSON"]); return }
@@ -100,14 +146,16 @@ public final class HTTPServer {
                   let code = obj["code"] as? String, PairingRequestPolicy.valid(id: deviceId, name: deviceName, code: code) else {
                 respond(fd, 400, ["error": "Invalid pairing details"]); return
             }
+            guard obj["protocolVersion"] as? Int == 3, let enrollmentNonce = obj["nonce"] as? String,
+                  SecurePairing.shared.consume(enrollmentNonce) else { respond(fd, 403, ["error": "Open a fresh pairing QR on your Mac and scan it again."]); return }
             guard Self.pairingPolicy.begin() else { respond(fd, 429, ["error": "Too many pairing requests. Try again shortly."]); return }
             defer { Self.pairingPolicy.finish() }
             guard let newToken = try? PairingRequestPolicy.token() else { respond(fd, 500, ["error": "Could not generate credentials"]); return }
             if PairingDialog.request(deviceName: deviceName, code: code) {
-                guard ClipStore.shared.saveTrustedDevice(id: deviceId, name: deviceName, token: newToken) else {
+                guard ClipStore.shared.saveTrustedDevice(id: deviceId, name: deviceName, token: newToken, securePairing: true) else {
                     respond(fd, 500, ["error": "Could not securely save pairing"]); return
                 }
-                respond(fd, 200, ["status": "ok", "token": newToken, "macName": Host.current().localizedName ?? "MacBook"])
+                respond(fd, 200, ["status": "ok", "token": newToken, "securityProtocol": 3, "macName": Host.current().localizedName ?? "MacBook"])
             } else { respond(fd, 403, ["error": "Pairing declined by user"]) }
             return
         }
@@ -186,7 +234,7 @@ public final class HTTPServer {
 
     @MainActor private func validDevice(_ token: String) -> PairedDevice? {
         guard !token.isEmpty else { return nil }
-        return ClipStore.shared.pairedDevices.first(where: { !$0.token.isEmpty && $0.token == token })
+        return ClipStore.shared.pairedDevices.first(where: { $0.securePairing == true && !$0.token.isEmpty && $0.token == token })
     }
 
     func respond(_ fd: Int32, _ status: Int, _ object: [String: Any]) {

@@ -67,7 +67,7 @@ public final class MacTransferService: ObservableObject {
 
     @discardableResult
     public func sendText(_ text: String, to device: PairedDevice) throws -> String {
-        guard ClipStore.shared.pairedDevices.contains(where: { $0.id == device.id && $0.token == device.token && !$0.token.isEmpty }) else { throw TransferError.invalidDevice }
+        guard ClipStore.shared.pairedDevices.contains(where: { $0.securePairing == true && $0.id == device.id && $0.token == device.token && !$0.token.isEmpty }) else { throw TransferError.invalidDevice }
         let bytes = Data(text.utf8)
         guard !bytes.isEmpty, bytes.count <= Self.maxBytes else { throw TransferError.invalidSize }
         let digest = Self.sha256(bytes)
@@ -82,7 +82,7 @@ public final class MacTransferService: ObservableObject {
 
     @discardableResult
     public func sendFile(_ url: URL, to device: PairedDevice) async throws -> String {
-        guard ClipStore.shared.pairedDevices.contains(where: { $0.id == device.id && $0.token == device.token && !$0.token.isEmpty }) else { throw TransferError.invalidDevice }
+        guard ClipStore.shared.pairedDevices.contains(where: { $0.securePairing == true && $0.id == device.id && $0.token == device.token && !$0.token.isEmpty }) else { throw TransferError.invalidDevice }
         let values = try url.resourceValues(forKeys: [.fileSizeKey, .contentTypeKey])
         let size = Int64(values.fileSize ?? 0)
         guard size >= 0 else { throw TransferError.invalidSize }
@@ -98,7 +98,7 @@ public final class MacTransferService: ObservableObject {
             try FileManager.default.copyItem(at: url, to: copied)
             guard try copied.resourceValues(forKeys: [.fileSizeKey]).fileSize == Int(size), try TransferVerifier.digest(file: copied) == digest else { try? FileManager.default.removeItem(at: copied); throw BucketError.invalid("Source changed while preparing transfer") }
         }.value
-        guard ClipStore.shared.pairedDevices.contains(where: { $0.id == device.id && $0.token == device.token }) else { try? FileManager.default.removeItem(at: copied); throw TransferError.invalidDevice }
+        guard ClipStore.shared.pairedDevices.contains(where: { $0.securePairing == true && $0.id == device.id && $0.token == device.token }) else { try? FileManager.default.removeItem(at: copied); throw TransferError.invalidDevice }
         if let pending = records.first(where: { $0.deviceId == device.id && $0.kind != "text" && $0.sha256 == digest }) { try? FileManager.default.removeItem(at: copied); return pending.transferId }
         let record = OutboundRecord(transferId: id, deviceId: device.id, deviceName: device.name, kind: mime.hasPrefix("image/") ? "image" : "file", mimeType: mime, name: name, text: "", app: Host.current().localizedName ?? "Mac", package: "", timestamp: Int64(Date().timeIntervalSince1970 * 1000), size: size, sha256: digest, attachmentPath: copied.path)
         do { try add(record) } catch { try? FileManager.default.removeItem(at: copied); throw error }
@@ -160,7 +160,7 @@ public final class MacTransferService: ObservableObject {
     }
 
     public func inbox(token: String) -> [[String: Any]]? {
-        guard let device = ClipStore.shared.pairedDevices.first(where: { !$0.token.isEmpty && $0.token == token }) else { return nil }
+        guard let device = ClipStore.shared.pairedDevices.first(where: { $0.securePairing == true && !$0.token.isEmpty && $0.token == token }) else { return nil }
         let items = records.filter { $0.deviceId == device.id && $0.paused != true }.map { r -> [String: Any] in
             ["transferId": r.transferId, "deviceId": r.deviceId, "kind": r.kind, "mimeType": r.mimeType, "name": r.name, "text": r.text, "app": r.app, "package": r.package, "timestamp": r.timestamp, "size": r.size, "sha256": r.sha256, "transferProtocol": 2]
         }
@@ -168,14 +168,14 @@ public final class MacTransferService: ObservableObject {
     }
 
     public func download(transferID: String, token: String) -> URL? {
-        guard let device = ClipStore.shared.pairedDevices.first(where: { !$0.token.isEmpty && $0.token == token }),
+        guard let device = ClipStore.shared.pairedDevices.first(where: { $0.securePairing == true && !$0.token.isEmpty && $0.token == token }),
               let record = records.first(where: { $0.transferId == transferID && $0.deviceId == device.id && $0.paused != true }),
               let path = record.attachmentPath else { return nil }
         return URL(fileURLWithPath: path)
     }
 
     func bucketManifest(id: String, token: String) -> TransferManifest? {
-        guard let device = ClipStore.shared.pairedDevices.first(where: { !$0.token.isEmpty && $0.token == token }),
+        guard let device = ClipStore.shared.pairedDevices.first(where: { $0.securePairing == true && !$0.token.isEmpty && $0.token == token }),
               let record = records.first(where: { $0.transferId == id && $0.deviceId == device.id && $0.paused != true && $0.kind != "text" }) else { return nil }
         return TransferManifest(protocolVersion: 2, transferId: record.transferId, size: record.size, bucketSize: TransferManifest.bucketBytes, sha256: record.sha256, kind: record.kind, mimeType: record.mimeType, name: record.name, app: record.app, package: record.package, timestamp: record.timestamp)
     }
@@ -186,7 +186,7 @@ public final class MacTransferService: ObservableObject {
     }
 
     public func acknowledge(ids: [String], token: String) -> Bool {
-        guard let device = ClipStore.shared.pairedDevices.first(where: { !$0.token.isEmpty && $0.token == token }) else { return false }
+        guard let device = ClipStore.shared.pairedDevices.first(where: { $0.securePairing == true && !$0.token.isEmpty && $0.token == token }) else { return false }
         let authorizedIDs = records.filter { ids.contains($0.transferId) && $0.deviceId == device.id }.map(\.transferId)
         let previous = records
         records.removeAll { authorizedIDs.contains($0.transferId) }
@@ -197,7 +197,7 @@ public final class MacTransferService: ObservableObject {
     }
 
     public func acceptIncoming(metadata: [String: Any], body: Data, token: String) -> Bool {
-        guard let device = ClipStore.shared.pairedDevices.first(where: { !$0.token.isEmpty && $0.token == token }),
+        guard let device = ClipStore.shared.pairedDevices.first(where: { $0.securePairing == true && !$0.token.isEmpty && $0.token == token }),
               let wireID = metadata["transferId"] as? String, wireID.range(of: "^[A-Za-z0-9_-]{1,128}$", options: .regularExpression) != nil,
               let kind = metadata["kind"] as? String, ["text", "image", "file"].contains(kind), body.count <= Self.maxBytes else { return false }
         let id = TransferIdentity.scoped(owner: device.id, id: wireID)

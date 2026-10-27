@@ -15,12 +15,14 @@ public struct PairedDevice: Identifiable, Codable, Equatable {
     public let name: String
     public let token: String
     public let pairedAt: Date
+    public let securePairing: Bool?
     
-    public init(id: String, name: String, token: String, pairedAt: Date = Date()) {
+    public init(id: String, name: String, token: String, pairedAt: Date = Date(), securePairing: Bool? = nil) {
         self.id = id
         self.name = name
         self.token = token
         self.pairedAt = pairedAt
+        self.securePairing = securePairing
     }
 }
 
@@ -138,10 +140,10 @@ public class ClipStore: ObservableObject {
     }
     
     // MARK: - Multi-Device Pairing Management
-    @discardableResult public func saveTrustedDevice(id: String, name: String, token: String) -> Bool {
+    @discardableResult public func saveTrustedDevice(id: String, name: String, token: String, securePairing: Bool = false) -> Bool {
         let previous = pairedDevices
         pairedDevices.removeAll { $0.id == id || $0.token == token }
-        let newDevice = PairedDevice(id: id, name: name, token: token)
+        let newDevice = PairedDevice(id: id, name: name, token: token, securePairing: securePairing)
         pairedDevices.append(newDevice)
         guard saveTrustedDevices() else { pairedDevices = previous; return false }
         sendSystemNotification(title: "Device Paired", body: "Successfully paired with \(name)")
@@ -154,7 +156,7 @@ public class ClipStore: ObservableObject {
               !pairedDevices.contains(where: { $0.id == id && $0.token != token }) else { return false }
         let old = pairedDevices[index]
         if old.id == id { return true }
-        pairedDevices[index] = PairedDevice(id: id, name: old.name, token: token, pairedAt: old.pairedAt)
+        pairedDevices[index] = PairedDevice(id: id, name: old.name, token: token, pairedAt: old.pairedAt, securePairing: old.securePairing)
         guard saveTrustedDevices() else { pairedDevices[index] = old; return false }
         for i in clips.indices where clips[i].sourceDeviceId == old.id { clips[i].sourceDeviceId = id }
         saveClips()
@@ -171,7 +173,7 @@ public class ClipStore: ObservableObject {
     public func unpairAll() { unpairDevice() }
 
     public func validateToken(_ token: String) -> Bool {
-        !token.isEmpty && pairedDevices.contains(where: { !$0.token.isEmpty && $0.token == token })
+        !token.isEmpty && pairedDevices.contains(where: { $0.securePairing == true && !$0.token.isEmpty && $0.token == token })
     }
 
     @discardableResult private func saveTrustedDevices() -> Bool {

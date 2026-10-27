@@ -23,10 +23,10 @@ public struct ContentView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            header
+            header.zIndex(1)
             Rectangle().fill(.primary.opacity(0.08)).frame(height: 1)
             if settings { preferences } else { feed }
-            footer
+            footer.zIndex(1)
         }
         .font(.system(size: 13, design: .default))
         .frame(width: 420, height: 620)
@@ -246,8 +246,10 @@ public struct ContentView: View {
     }
 
     private var preferences: some View {
-        ScrollView {
+        ScrollViewReader { proxy in
+        ScrollView(.vertical, showsIndicators: true) {
             VStack(alignment: .leading, spacing: 22) {
+                section("SECURE PAIRING") { SecurePairingView() }
                 section("PREFERENCES") {
                     preference("Launch at login", subtitle: "Ready when your Mac starts", value: $store.launchAtLogin)
                     Divider().opacity(0.3)
@@ -266,7 +268,7 @@ public struct ContentView: View {
                     ForEach(store.pairedDevices) { device in
                         HStack(spacing: 10) {
                             Image(systemName: "iphone").foregroundStyle(.secondary)
-                            Text(device.name).font(.system(size: 12, weight: .medium))
+                            Text(device.name + (device.securePairing == true ? "" : " · Re-pair required")).font(.system(size: 12, weight: .medium))
                             Spacer()
                             Button("Unpair") { unpairTarget = device }
                                 .font(.system(size: 11)).buttonStyle(.plain).foregroundStyle(.secondary)
@@ -288,6 +290,14 @@ public struct ContentView: View {
                     .disabled(store.clips.isEmpty)
             }
             .padding(20)
+            .id("settings-top")
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
+        .onAppear { proxy.scrollTo("settings-top", anchor: .top) }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ClipToMacMenuOpened"))) { _ in
+            proxy.scrollTo("settings-top", anchor: .top)
+        }
         }
     }
 

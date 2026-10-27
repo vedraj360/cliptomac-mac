@@ -1,8 +1,8 @@
 import Foundation
 
 struct PairedDevice: Codable {
-    let id: String; let name: String; let token: String; let pairedAt: Date
-    init(id: String, name: String, token: String, pairedAt: Date = Date()) { self.id = id; self.name = name; self.token = token; self.pairedAt = pairedAt }
+    let id: String; let name: String; let token: String; let pairedAt: Date; let securePairing: Bool?
+    init(id: String, name: String, token: String, pairedAt: Date = Date(), securePairing: Bool? = nil) { self.id = id; self.name = name; self.token = token; self.pairedAt = pairedAt; self.securePairing = securePairing }
 }
 final class MemoryVault: PairingSecretVault {
     var secrets: [String: String] = [:]

@@ -43,6 +43,8 @@ cat << 'PLIST' > "$BUNDLE_DIR/Contents/Info.plist"
     <string>13.0</string>
     <key>LSUIElement</key>
     <true/>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Securely transfer clips and files with your paired phone on your local network.</string>
     <key>NSHighResolutionCapable</key>
     <true/>
 </dict>
@@ -50,3 +52,14 @@ cat << 'PLIST' > "$BUNDLE_DIR/Contents/Info.plist"
 PLIST
 
 echo "✅ Build complete: $BUNDLE_DIR"
+
+# Certificate signing is opt-in. Set this only after the developer authorizes that identity.
+APP_SIGN_IDENTITY="${CLIPTOMAC_SIGN_IDENTITY:-}"
+if [ -n "$APP_SIGN_IDENTITY" ]; then
+    codesign --force --options runtime --identifier com.vdx.cliptomac --sign "$APP_SIGN_IDENTITY" "$BUNDLE_DIR"
+    codesign --verify --strict "$BUNDLE_DIR"
+    echo "Explicitly requested certificate signing applied."
+else
+    codesign --force --identifier com.vdx.cliptomac --sign - "$BUNDLE_DIR"
+    echo "Local ad-hoc build. Certificate signing requires explicit CLIPTOMAC_SIGN_IDENTITY opt-in."
+fi

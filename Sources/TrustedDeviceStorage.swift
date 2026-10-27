@@ -35,7 +35,7 @@ struct KeychainPairingVault: PairingSecretVault {
 /// JSON stores device metadata and an opaque reference; the bearer token lives in Keychain.
 final class TrustedDeviceStorage {
     private struct Record: Codable {
-        let id: String; let name: String; let pairedAt: Date; let credentialRef: String
+        let id: String; let name: String; let pairedAt: Date; let credentialRef: String; let securePairing: Bool?
     }
     private let url: URL
     private let vault: PairingSecretVault
@@ -59,7 +59,7 @@ final class TrustedDeviceStorage {
             let devices = try records.map { record -> PairedDevice in
                 let token = try vault.read(record.credentialRef)
                 loaded[record.id] = (token, record.credentialRef)
-                return PairedDevice(id: record.id, name: record.name, token: token, pairedAt: record.pairedAt)
+                return PairedDevice(id: record.id, name: record.name, token: token, pairedAt: record.pairedAt, securePairing: record.securePairing)
             }
             references = loaded
             return devices
@@ -85,7 +85,7 @@ final class TrustedDeviceStorage {
                     try vault.write(device.token, reference: reference); created.append(reference)
                 }
                 next[device.id] = (device.token, reference)
-                return Record(id: device.id, name: device.name, pairedAt: device.pairedAt, credentialRef: reference)
+                return Record(id: device.id, name: device.name, pairedAt: device.pairedAt, credentialRef: reference, securePairing: device.securePairing)
             }
             try PrivateAppStorage.write(JSONEncoder().encode(records), to: url)
         } catch { created.forEach { vault.remove($0) }; throw error }

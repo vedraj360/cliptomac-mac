@@ -95,6 +95,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         let y = max(visible.minY + 8, anchor.minY - panel.frame.height - 7)
         panel.setFrameOrigin(NSPoint(x: x, y: y))
         panel.makeKeyAndOrderFront(nil)
+        NotificationCenter.default.post(name: Notification.Name("ClipToMacMenuOpened"), object: nil)
     }
 
     @objc func onNewClip() {

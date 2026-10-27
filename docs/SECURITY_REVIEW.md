@@ -1,6 +1,8 @@
 # ClipToMac security review — 27 October 2026
 
-**Release decision: do not sell the current build as a secure product.** This is a source review and targeted hardening, not a penetration test or security certification. No system can promise that it cannot be hacked. The main remaining blocker is unencrypted, unauthenticated-to-the-phone HTTP transport, including pairing.
+**Update: pinned TLS and one-use QR pairing are now implemented and tested; see [Secure pairing v3](SECURE_PAIRING_V3.md). The findings below describe the audit baseline and remaining release work.**
+
+**Release decision: do not sell the current build as a secure product.** This is a source review and targeted hardening, not a penetration test or security certification. No system can promise that it cannot be hacked. The original main blocker was unencrypted HTTP transport, including pairing; that gap is addressed by v3. Commercial release validation and signing remain incomplete.
 
 ## Scope and attacker model
 
@@ -27,9 +29,9 @@ Unpairing and replacement remove unused Keychain secrets after metadata commits.
 
 The receive cue was also changed from Pop/beep to a quieter built-in Tink sound, respecting the sound setting.
 
-## Remaining work, in priority order — proposal, not implemented
+## Audit roadmap (P0 transport/QR enrollment subsequently implemented by v3; other items remain)
 
-### P0: encrypted transport with authenticated peer identity
+### P0: encrypted transport with authenticated peer identity — implemented; release audit pending
 
 1. Replace plaintext TCP HTTP with TLS using platform implementations (Network.framework on Mac and OkHttp's supported TLS stack on Android). Prefer TLS 1.3; permit only an explicitly justified minimum such as TLS 1.2. Do not invent encryption or use a trust-all certificate callback.
 2. Pin the Mac's public identity during a verified enrollment flow. An IP address, Android ID, display name or discovery response is never proof of identity. IP changes must preserve the pin; unexpected identity changes must require explicit re-pairing.
@@ -38,7 +40,7 @@ The receive cue was also changed from Pop/beep to a quieter built-in Tink sound,
 
 Acceptance: packet capture reveals no tokens/content; a substituted certificate, spoofed discovery response, changed pin and downgrade attempt all fail. Normal discovery/IP changes and large-file resume still work.
 
-### P0: replace legacy pairing with a verified enrollment protocol
+### P0: replace legacy pairing with verified enrollment — QR/TLS + token implemented; client-key/mTLS proposal deferred
 
 Recommended customer flow:
 
@@ -76,7 +78,7 @@ Acceptance: fake Mac/phone, replay, expired enrollment, concurrent enrollment, c
 - Publish a privacy policy/data-retention statement, incident-response/contact process and supported OS/device matrix. Inventory dependencies, review vulnerabilities and licenses, and secure build/update credentials.
 - Commission an independent penetration test after the transport/enrollment redesign; include hostile-LAN, parser/fuzz, stolen-token, multi-device isolation, revocation, malicious-share and large-transfer tests. Passing our regression tests is not a substitute.
 
-## Validation and deployment status
+## Audit-baseline validation and deployment status (superseded by v3 notes)
 
 - Mac SecurityHarness passed: isolated real Keychain write/read/removal; fake-vault legacy migration, rotation/revocation, failure rollback, missing-secret rejection, overwrite prevention, permissions, pairing validation/rate limits, random token length.
 - Mac LibraryStoreHarness passed: history migration, pins/collections, backup/reload, deletion/Undo/original-file protection and stable device identity.

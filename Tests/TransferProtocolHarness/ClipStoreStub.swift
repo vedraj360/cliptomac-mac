@@ -2,8 +2,8 @@ import Foundation
 
 public enum ClipKind: String { case text, image, file }
 public struct PairedDevice: Identifiable, Codable, Equatable {
-    public let id: String; public let name: String; public let token: String; public let pairedAt: Date
-    public init(id: String, name: String, token: String, pairedAt: Date = Date()) { self.id=id; self.name=name; self.token=token; self.pairedAt=pairedAt }
+    public let id: String; public let name: String; public let token: String; public let pairedAt: Date; public let securePairing: Bool?
+    public init(id: String, name: String, token: String, pairedAt: Date = Date(), securePairing: Bool? = true) { self.id=id; self.name=name; self.token=token; self.pairedAt=pairedAt; self.securePairing=securePairing }
 }
 @MainActor public final class ClipStore {
     public static let shared = ClipStore()
@@ -12,7 +12,7 @@ public struct PairedDevice: Identifiable, Codable, Equatable {
     public var pairedDeviceName: String { pairedDevices.map(\.name).joined(separator: ", ") }
     public let attachmentDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("ClipToMac-transfer-test-attachments-\(UUID().uuidString)")
     public init() { try? FileManager.default.createDirectory(at: attachmentDirectory, withIntermediateDirectories: true) }
-    @discardableResult public func saveTrustedDevice(id: String, name: String, token: String) -> Bool { pairedDevices.removeAll { $0.id == id }; pairedDevices.append(PairedDevice(id:id,name:name,token:token)); return true }
+    @discardableResult public func saveTrustedDevice(id: String, name: String, token: String, securePairing: Bool = true) -> Bool { pairedDevices.removeAll { $0.id == id }; pairedDevices.append(PairedDevice(id:id,name:name,token:token,securePairing:securePairing)); return true }
     public func migrateDeviceIdentity(token: String, id: String) -> Bool { guard let i = pairedDevices.firstIndex(where: { $0.token == token }), id.hasPrefix("android-") else { return false }; let old = pairedDevices[i]; pairedDevices[i] = PairedDevice(id: id, name: old.name, token: token, pairedAt: old.pairedAt); return true }
     @discardableResult public func unpairDevice(id: String? = nil) -> Bool { if let id { pairedDevices.removeAll { $0.id == id } } else { pairedDevices=[] }; return true }
     public func seenTransferAttempt(_ id: String) -> Bool { seen.contains(id) }
