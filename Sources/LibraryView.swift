@@ -198,35 +198,7 @@ struct LibraryView: View {
             }
         }.padding(24).frame(width: 410).background(.regularMaterial)
     }
-    @ViewBuilder private var transferTray: some View {
-        let active = (transfers.outboundItems + transfers.incomingItems).filter { !["delivered", "cancelled", "complete"].contains($0.state) }
-        if !active.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("TRANSFERS · \(active.count)").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
-                ForEach(active.suffix(3)) { item in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(item.name).lineLimit(1)
-                            Text("\(item.direction == "received" ? "From" : "To") \(item.deviceName) · \(item.state)").font(.system(size: 10)).foregroundStyle(.secondary)
-                            if item.bytesPerSecond > 0, let remaining = item.estimatedSecondsRemaining {
-                                Text("\(ByteCountFormatter.string(fromByteCount: Int64(item.bytesPerSecond), countStyle: .file))/s · ETA \(Int(remaining) / 60)m \(Int(remaining) % 60)s").font(.system(size: 10)).foregroundStyle(.secondary)
-                            }
-                        }
-                        Spacer()
-                        VStack(alignment: .trailing, spacing: 3) {
-                            Text("\(ByteCountFormatter.string(fromByteCount: item.bytesSent, countStyle: .file)) / \(ByteCountFormatter.string(fromByteCount: item.totalBytes, countStyle: .file))")
-                            Text(item.totalBytes > 0 ? "\(Int(min(100, Double(item.bytesSent) / Double(item.totalBytes) * 100)))%" : "0%")
-                        }.font(.system(size: 10)).foregroundStyle(.secondary)
-                        if item.totalBytes > 0 { ProgressView(value: Double(item.bytesSent), total: Double(item.totalBytes)).frame(width: 65) }
-                        if item.direction == "sent" {
-                        Button(item.state == "paused" ? "Resume" : "Pause") { transfers.togglePause(id: item.id) }.buttonStyle(.bordered).controlSize(.small)
-                        Button("Cancel") { transfers.cancel(id: item.id) }.buttonStyle(.bordered).controlSize(.small)
-                        }
-                    }
-                }
-            }.padding(12).background(.primary.opacity(0.035))
-        }
-    }
+    private var transferTray: some View { TransferPanel() }
     private func settingsSection<Content:View>(_ title:String,@ViewBuilder content:()->Content)->some View { VStack(alignment:.leading,spacing:12){Text(title).font(.system(size:9,weight:.semibold)).tracking(1.4).foregroundStyle(.secondary);content()}.padding(15).frame(maxWidth:.infinity,alignment:.leading).background(.primary.opacity(0.035),in:RoundedRectangle(cornerRadius:8)) }
     private func backupExport(){let p=NSSavePanel();p.nameFieldStringValue="ClipToMac-backup.json";p.begin{if $0 == .OK,let u=p.url{do{try store.exportBackup(to:u)}catch{notice=error.localizedDescription}}}}
     private func backupImport(){let p=NSOpenPanel();p.canChooseFiles=true;p.allowedContentTypes=[.json];p.begin{if $0 == .OK,let u=p.url{do{try store.importBackup(from:u);notice="Backup imported."}catch{notice=error.localizedDescription}}}}
@@ -262,7 +234,7 @@ struct SourceAppIcon: View {
 
 private struct ReadableLibraryGlass: View {
     @Environment(\.colorScheme) private var colorScheme
-    var body: some View { ZStack { if #available(macOS 26.0,*) { Color.clear.glassEffect(.regular,in:RoundedRectangle(cornerRadius:9)); RoundedRectangle(cornerRadius:9).fill(colorScheme == .dark ? Color.black.opacity(0.16):Color.white.opacity(0.16)) } else { VisualEffectView(material:.sidebar,blendingMode:.behindWindow) } } }
+    var body: some View { ZStack { if #available(macOS 26.0,*) { Color.clear.glassEffect(.regular,in:Rectangle()); Rectangle().fill(colorScheme == .dark ? Color.black.opacity(0.16):Color.white.opacity(0.16)) } else { VisualEffectView(material:.sidebar,blendingMode:.behindWindow) } } }
 }
 
 private struct LibrarySidebarButtonStyle: ButtonStyle {

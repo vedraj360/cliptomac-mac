@@ -30,20 +30,24 @@ extension Harness {
         let tail = Data(repeating: 77, count: 123)
         try storage.put(owner: "a", id: sparse.transferId, index: sparse.bucketCount - 1, bytes: tail, checksum: TransferVerifier.digest(tail))
         let largeReceipt = try storage.start(sparse, owner: "a")
-        precondition(largeReceipt["received"] as? [Int] == [640], "64-bit bucket offset failed")
+        precondition(largeReceipt["received"] as? [Int] == [sparse.bucketCount - 1], "64-bit bucket offset failed")
         try storage.cancel(owner: "a", id: sparse.transferId)
 
-        @Sendable func request(_ method: String, _ path: String, _ data: Data = Data(), token: String = "token-a", checksum: String? = nil) async throws -> Data {
+        @Sendable func request(_ method: String, _ path: String, _ data: Data = Data(), token: String = "token-a", checksum: String? = nil, fragment: Int = Int.max) async throws -> Data {
             let extra = checksum.map { "X-Bucket-SHA256: \($0)\r\n" } ?? ""
             let head = Data("\(method) \(path) HTTP/1.1\r\nHost: localhost\r\nX-ClipToMac-Token: \(token)\r\n\(extra)Content-Length: \(data.count)\r\n\r\n".utf8)
-            return try await requestAsync(head + data)
+            return try await requestAsync(head + data, fragmentSize: fragment)
         }
         let meta = try JSONEncoder().encode(manifest)
         let created = try await request("POST", "/buckets/start", meta)
         precondition(status(created) == 200)
-        async let a = request("PUT", "/buckets/bucket-fixture/0", Data(first), checksum: TransferVerifier.digest(Data(first)))
+        let a = Task { try await request("PUT", "/buckets/bucket-fixture/0", Data(first), checksum: TransferVerifier.digest(Data(first)), fragment: 1024) }
+        try await Task.sleep(nanoseconds: 300_000_000)
+        let progressID = TransferIdentity.scoped(owner: "test-a", id: manifest.transferId)
+        let liveBytes = MacTransferService.shared.incomingItems.first(where: { $0.id == progressID })?.bytesSent ?? 0
+        precondition(liveBytes > 0 && liveBytes < Int64(manifest.bucketSize), "No live receiving progress before bucket completion")
         async let b = request("PUT", "/buckets/bucket-fixture/1", last, checksum: TransferVerifier.digest(last))
-        let results = try await [a, b]
+        let results = try await [a.value, b]
         precondition(results.allSatisfy { status($0) == 200 }, "parallel bucket upload failed")
         let leaked = try await request("PUT", "/buckets/bucket-fixture/1", last, token: "token-b", checksum: TransferVerifier.digest(last))
         precondition(status(leaked) == 400, "cross-device bucket accepted")

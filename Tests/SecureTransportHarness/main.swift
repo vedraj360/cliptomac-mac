@@ -49,7 +49,8 @@ import CryptoKit
         for _ in 0..<1200 {
             for device in ClipStore.shared.pairedDevices where device.securePairing == true && !seeded.contains(device.id) {
                 seeded.insert(device.id)
-                _ = try await MacTransferService.shared.sendFile(source, to: device)
+                do { _ = try await MacTransferService.shared.sendFile(source, to: device) }
+                catch TransferError.invalidDevice { /* The revocation test may revoke while the fixture prepares its file. */ }
             }
             let renewal = root.appendingPathComponent("renew")
             if FileManager.default.fileExists(atPath: renewal.path) {

@@ -2,7 +2,7 @@ import Foundation
 
 /// Version 2 wire format. Sizes and offsets are 64-bit; file size has no protocol cap.
 struct TransferManifest: Codable, Equatable {
-    static let bucketBytes = 8 * 1024 * 1024
+    static let bucketBytes = 4 * 1024 * 1024
     let protocolVersion: Int
     let transferId: String
     let size: Int64

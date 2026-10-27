@@ -55,7 +55,7 @@ assert request("POST", "/pair/request", pair)[0] == 403, "Enrollment nonce was r
 assert request("GET", "/inbox", token=token)[0] == 200
 
 payload = bytes(range(251)) * 66000  # Two parallel buckets, with a partial final bucket.
-manifest = {"protocolVersion": 2, "transferId": "secure-fixture", "size": len(payload), "bucketSize": 8 * 1024 * 1024,
+manifest = {"protocolVersion": 2, "transferId": "secure-fixture", "size": len(payload), "bucketSize": 4 * 1024 * 1024,
             "sha256": hashlib.sha256(payload).hexdigest(), "kind": "file", "mimeType": "application/octet-stream",
             "name": "fixture.bin", "app": "Fixture", "package": "fixture", "timestamp": 0}
 assert request("POST", "/buckets/start", manifest, token)[0] == 200
@@ -63,7 +63,7 @@ def send(index):
     bucket = payload[index * manifest["bucketSize"]:(index + 1) * manifest["bucketSize"]]
     return request("PUT", f"/buckets/secure-fixture/{index}", bucket, token, {"X-Bucket-SHA256": hashlib.sha256(bucket).hexdigest()})[0]
 with concurrent.futures.ThreadPoolExecutor(max_workers=2) as workers:
-    assert list(workers.map(send, [0, 1])) == [200, 200]
+    assert list(workers.map(send, range((len(payload) + manifest["bucketSize"] - 1) // manifest["bucketSize"]))) == [200] * ((len(payload) + manifest["bucketSize"] - 1) // manifest["bucketSize"])
 assert request("POST", "/buckets/secure-fixture/complete", {}, token)[0] == 200
 assert request("POST", "/buckets/secure-fixture/complete", {}, token)[0] == 200
 assert request("POST", "/pair/unpair", {}, token)[0] == 200

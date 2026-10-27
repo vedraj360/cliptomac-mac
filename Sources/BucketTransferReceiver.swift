@@ -13,7 +13,15 @@ extension HTTPServer {
                     let receipt = try BucketTransferStorage.shared.start(manifest, owner: owner)
                     let indices = receipt["received"] as? [Int] ?? []
                     let bytes = indices.reduce(Int64(0)) { $0 + Int64((try? manifest.length($1)) ?? 0) }
-                    await MainActor.run { MacTransferService.shared.updateIncoming(manifest, device: device, bytes: bytes) }
+                    await MainActor.run {
+                        MacTransferService.shared.updateIncoming(manifest, device: device, bytes: bytes)
+                        IncomingByteProgress.shared.register(owner: owner, token: device.token, manifest: manifest, received: indices) { count in
+                            Task { @MainActor in
+                                guard ClipStore.shared.pairedDevices.contains(where: { $0.id == owner && $0.token == device.token && $0.securePairing == true }) else { return }
+                                MacTransferService.shared.updateIncoming(manifest, device: device, bytes: count)
+                            }
+                        }
+                    }
                     self.respond(fd, 200, receipt)
                 }
                 catch { self.respond(fd, 400, ["error": error.localizedDescription]) }
@@ -23,6 +31,7 @@ extension HTTPServer {
             Task.detached {
                 do {
                     let (manifest, bytes) = try BucketTransferStorage.shared.put(owner: owner, id: pieces[1], index: index, bytes: req.body, checksum: checksum)
+                    IncomingByteProgress.shared.confirmed(token: device.token, id: pieces[1], index: index)
                     await MainActor.run { MacTransferService.shared.updateIncoming(manifest, device: device, bytes: bytes) }
                     self.respond(fd, 200, ["status": "ok"])
                 }

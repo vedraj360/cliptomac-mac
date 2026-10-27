@@ -25,6 +25,7 @@ public struct ContentView: View {
         VStack(spacing: 0) {
             header.zIndex(1)
             Rectangle().fill(.primary.opacity(0.08)).frame(height: 1)
+            TransferPanel(compact: true)
             if settings { preferences } else { feed }
             footer.zIndex(1)
         }

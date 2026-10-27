@@ -110,7 +110,7 @@ public final class MacTransferService: ObservableObject {
     func updateIncoming(_ manifest: TransferManifest, device: PairedDevice, bytes: Int64) {
         let id = String(TransferVerifier.digest(Data(device.id.utf8)).prefix(16)) + "-" + manifest.transferId
         let previous = incomingItems.first(where: { $0.id == id })
-        if let previous, ["verifying", "complete"].contains(previous.state) { return }
+        if let previous, ["verifying", "complete", "cancelled"].contains(previous.state) { return }
         let value = max(previous?.bytesSent ?? 0, bytes)
         let sample = rates.sample(id, bytes: value, total: manifest.size)
         let item = FileTransferStatus(id: id, deviceID: device.id, deviceName: device.name, name: manifest.name, bytesSent: value, totalBytes: manifest.size, state: "receiving", error: nil, createdAt: previous?.createdAt ?? Date(), bytesPerSecond: sample.0, estimatedSecondsRemaining: sample.1, direction: "received")
@@ -118,6 +118,7 @@ public final class MacTransferService: ObservableObject {
         incomingItems = Array(incomingItems.suffix(50))
     }
     func incomingState(owner: String, transferID: String, state: String, error: String? = nil) {
+        if ["complete", "cancelled", "failed"].contains(state) { IncomingByteProgress.shared.finish(owner: owner, id: transferID) }
         let id = String(TransferVerifier.digest(Data(owner.utf8)).prefix(16)) + "-" + transferID
         guard let index = incomingItems.firstIndex(where: { $0.id == id }) else { return }
         let old = incomingItems[index]; rates.reset(id)

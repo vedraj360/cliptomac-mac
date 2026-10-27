@@ -123,9 +123,13 @@ public final class HTTPServer {
         let bodyLimit = path == "/pair/request" ? 4096 : (path.hasPrefix("/buckets/") ? TransferManifest.bucketBytes : maxBody)
         guard let length, length >= 0, length <= bodyLimit else { return nil }
         let bodyStart = split.upperBound
+        let live = parts[0] == "PUT" && headers["origin"] == nil && headers["sec-fetch-site"] == nil
+            ? IncomingByteProgress.shared.reader(token: headers["x-cliptomac-token"] ?? "", path: path, length: length) : nil
+        live?(min(length, data.count - bodyStart))
         while data.count - bodyStart < length {
             guard ProcessInfo.processInfo.systemUptime < deadline else { return nil }
             let n = recv(fd, &buffer, min(buffer.count, length - (data.count - bodyStart)), 0); guard n > 0 else { return nil }; data.append(contentsOf: buffer.prefix(n))
+            live?(min(length, data.count - bodyStart))
             if data.count - bodyStart > maxBody { return nil }
         }
         return Request(method: String(parts[0]), path: String(parts[1]).components(separatedBy: "?")[0], headers: headers, body: Data(data[bodyStart..<(bodyStart + length)]))
