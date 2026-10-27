@@ -131,9 +131,9 @@ public struct ContentView: View {
                 } label: {
                     Label(store.connectionState() == .unpaired ? "Pair phone" : "Pair securely", systemImage: "qrcode")
                         .font(.system(size: 12, weight: .semibold))
-                        .frame(maxWidth: .infinity).padding(.vertical, 5)
+                        .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(GraphiteButtonStyle())
                 .help("Open a fresh QR to pair your phone")
             }
         }

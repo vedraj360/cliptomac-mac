@@ -27,7 +27,7 @@ struct SecurePairingView: View {
                     Text("Already paired. A QR is only needed to add another phone or pair again.")
                         .font(.system(size: 11)).foregroundStyle(.secondary)
                 }
-                Button(pairing.expired ? "Generate new QR" : (store.connectionState() == .connected || store.connectionState() == .offline ? "Add or re-pair a phone" : "Show pairing QR")) { store.updateLocalIP(); pairing.open(host: store.localIP, port: store.port) }.buttonStyle(.borderedProminent)
+                Button(pairing.expired ? "Generate new QR" : (store.connectionState() == .connected || store.connectionState() == .offline ? "Add or re-pair a phone" : "Show pairing QR")) { store.updateLocalIP(); pairing.open(host: store.localIP, port: store.port) }.buttonStyle(GraphiteButtonStyle())
             }
             if let error = pairing.error { Text(error).font(.system(size: 11)).foregroundStyle(.red) }
         }
