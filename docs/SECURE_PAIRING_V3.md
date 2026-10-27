@@ -80,3 +80,11 @@ Primary references:
 - Scanner documentation/license: https://github.com/journeyapps/zxing-android-embedded
 
 Mac settings scrolling was also constrained/clipped to its content region, with scroll indicators enabled and the settings position reset to the secure-pairing section on reopen. Header/footer remain separate from the scroll area.
+
+## Connection-status correction
+
+A saved device record no longer means “connected.” The menu header/footer distinguish Not paired, Secure pairing required, Paired · not connected, and Connected · device name. Only a securely enrolled phone with authenticated activity in the last 60 seconds appears green. App startup alone does not imply a live connection, and the UI periodically expires stale activity. A saved legacy phone gets an explicit one-time secure re-pair explanation. Securely paired phones get an optional Add/re-pair action rather than an instruction implying they must pair again.
+
+Android foreground checks use the pairing token, recognize rejected pairings, and refresh activity every 20 seconds while foreground/idle; ordinary transfer/inbox traffic refreshes Mac presence as well. Missing enrollment is described as a pairing requirement rather than an unavailable Mac.
+
+State/expiry/unpair regression tests and invalid-token ping tests passed. The Mac status update was compiled separately without using a developer certificate. Deployment of the next Mac build remains pending the user's signing choice.

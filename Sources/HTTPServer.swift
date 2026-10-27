@@ -138,6 +138,10 @@ public final class HTTPServer {
         if req.method == "OPTIONS" { respond(fd, 403, ["error": "Browser requests are not allowed"]); return }
         if req.method == "GET" && (req.path == "/ping" || req.path == "/") {
             let store = ClipStore.shared
+            if !token.isEmpty {
+                guard let device = validDevice(token) else { respond(fd, 401, ["error": "Secure pairing required or device revoked"]); return }
+                store.markDeviceSeen(id: device.id)
+            }
             respond(fd, 200, ["status": "ok", "service": "ClipToMac", "device": Host.current().localizedName ?? "MacBook", "isPaired": store.hasPairedDevices, "transferProtocol": 2, "securityProtocol": 3]); return
         }
         if req.method == "POST" && req.path == "/pair/request" {
@@ -155,11 +159,13 @@ public final class HTTPServer {
                 guard ClipStore.shared.saveTrustedDevice(id: deviceId, name: deviceName, token: newToken, securePairing: true) else {
                     respond(fd, 500, ["error": "Could not securely save pairing"]); return
                 }
+                ClipStore.shared.markDeviceSeen(id: deviceId)
                 respond(fd, 200, ["status": "ok", "token": newToken, "securityProtocol": 3, "macName": Host.current().localizedName ?? "MacBook"])
             } else { respond(fd, 403, ["error": "Pairing declined by user"]) }
             return
         }
-        guard validDevice(token) != nil else { respond(fd, 401, ["error": "Device not paired or invalid token"]); return }
+        guard let authenticatedDevice = validDevice(token) else { respond(fd, 401, ["error": "Device not paired or invalid token"]); return }
+        ClipStore.shared.markDeviceSeen(id: authenticatedDevice.id)
         if req.method == "POST", req.path == "/pair/identity", let device = validDevice(token) {
             guard let object = try? JSONSerialization.jsonObject(with: req.body) as? [String: Any], let id = object["deviceId"] as? String,
                   ClipStore.shared.migrateDeviceIdentity(token: token, id: id) else { respond(fd, 409, ["error": "Device identity could not be updated"]); return }

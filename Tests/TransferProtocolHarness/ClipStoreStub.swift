@@ -15,6 +15,7 @@ public struct PairedDevice: Identifiable, Codable, Equatable {
     @discardableResult public func saveTrustedDevice(id: String, name: String, token: String, securePairing: Bool = true) -> Bool { pairedDevices.removeAll { $0.id == id }; pairedDevices.append(PairedDevice(id:id,name:name,token:token,securePairing:securePairing)); return true }
     public func migrateDeviceIdentity(token: String, id: String) -> Bool { guard let i = pairedDevices.firstIndex(where: { $0.token == token }), id.hasPrefix("android-") else { return false }; let old = pairedDevices[i]; pairedDevices[i] = PairedDevice(id: id, name: old.name, token: token, pairedAt: old.pairedAt); return true }
     @discardableResult public func unpairDevice(id: String? = nil) -> Bool { if let id { pairedDevices.removeAll { $0.id == id } } else { pairedDevices=[] }; return true }
+    public func markDeviceSeen(id: String) {}
     public func seenTransferAttempt(_ id: String) -> Bool { seen.contains(id) }
     public func addTransferredItem(id: String, text: String, appName: String, packageName: String, timestamp: Date, kind: String, mimeType: String? = nil, attachmentName: String? = nil, attachmentPath: String? = nil, direction: String = "received", sourceDeviceId: String? = nil, contentHash: String? = nil) -> Bool { guard !seen.contains(id) else{return false}; seen.insert(id); received[id] = (text, attachmentPath); return true }
     public func markOutboundDelivered(ids: [String]) { delivered.formUnion(ids) }

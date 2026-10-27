@@ -26,6 +26,10 @@ public struct PairedDevice: Identifiable, Codable, Equatable {
     }
 }
 
+public enum DeviceConnectionState: Equatable {
+    case unpaired, securePairingRequired, offline, connected
+}
+
 @MainActor
 public class ClipStore: ObservableObject {
     public static let shared = ClipStore()
@@ -49,6 +53,38 @@ public class ClipStore: ObservableObject {
     
     // Multi-Device Pairing Management
     @Published public var pairedDevices: [PairedDevice] = []
+    @Published private var deviceLastSeen: [String: Date] = [:]
+    @Published private var presenceTick = 0
+    private var presenceTimer: Timer?
+
+    public func markDeviceSeen(id: String, at date: Date = Date()) {
+        guard pairedDevices.contains(where: { $0.id == id && $0.securePairing == true }) else { return }
+        deviceLastSeen[id] = date
+    }
+    public func connectionState(at now: Date = Date()) -> DeviceConnectionState {
+        guard !pairedDevices.isEmpty else { return .unpaired }
+        let secure = pairedDevices.filter { $0.securePairing == true }
+        guard !secure.isEmpty else { return .securePairingRequired }
+        return secure.contains { device in deviceLastSeen[device.id].map { now.timeIntervalSince($0) >= 0 && now.timeIntervalSince($0) < 60 } ?? false } ? .connected : .offline
+    }
+    public var connectionSummary: String {
+        switch connectionState() {
+        case .unpaired: return "Not paired"
+        case .securePairingRequired: return "Secure pairing required"
+        case .offline: return "Paired · not connected"
+        case .connected:
+            let active = pairedDevices.filter { $0.securePairing == true && (deviceLastSeen[$0.id].map { Date().timeIntervalSince($0) >= 0 && Date().timeIntervalSince($0) < 60 } ?? false) }
+            return active.count == 1 ? "Connected · " + active[0].name : "Connected · \(active.count) phones"
+        }
+    }
+    public var connectionExplanation: String {
+        switch connectionState() {
+        case .unpaired: return "No phone is paired. Scan a pairing QR from the Android app."
+        case .securePairingRequired: return "Your saved phone uses the older pairing. Scan a fresh QR once to enable encrypted transfers."
+        case .offline: return "No recent authenticated phone activity. Open ClipToMac on your phone and check that both devices are on the same Wi-Fi."
+        case .connected: return "Recent authenticated phone activity over the encrypted connection."
+        }
+    }
     @Published public var undoAvailable = false
     @Published public var attachmentDirectory: URL
     @Published public var shortcutKeyCode: UInt32 {
@@ -110,7 +146,12 @@ public class ClipStore: ObservableObject {
         loadTrustedDevices()
         loadClips()
         sweepAttachmentDeletions()
-        if systemIntegration { updateLocalIP(); requestNotificationPermission() }
+        if systemIntegration {
+            updateLocalIP(); requestNotificationPermission()
+            presenceTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+                Task { @MainActor in self?.presenceTick += 1 }
+            }
+        }
     }
     
     public func updateLocalIP() {
@@ -142,6 +183,7 @@ public class ClipStore: ObservableObject {
     // MARK: - Multi-Device Pairing Management
     @discardableResult public func saveTrustedDevice(id: String, name: String, token: String, securePairing: Bool = false) -> Bool {
         let previous = pairedDevices
+        deviceLastSeen.removeValue(forKey: id)
         pairedDevices.removeAll { $0.id == id || $0.token == token }
         let newDevice = PairedDevice(id: id, name: name, token: token, securePairing: securePairing)
         pairedDevices.append(newDevice)

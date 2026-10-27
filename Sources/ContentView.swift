@@ -105,9 +105,9 @@ public struct ContentView: View {
                 .accessibilityLabel(settings ? "Close settings" : "Settings")
             }
             HStack(spacing: 7) {
-                Circle().fill(store.hasPairedDevices ? Color.green : Color.secondary.opacity(0.5))
+                Circle().fill(store.connectionState() == .connected ? Color.green : (store.connectionState() == .securePairingRequired ? Color.orange : Color.secondary.opacity(0.5)))
                     .frame(width: 6, height: 6)
-                Text(store.hasPairedDevices ? store.pairedDevicesSummary : "Pair a phone to get started")
+                Text(store.connectionSummary)
                     .font(.system(size: 11, weight: .medium))
                     .lineLimit(1)
                 Spacer()
@@ -122,7 +122,7 @@ public struct ContentView: View {
                 .buttonStyle(.plain)
                 .help("Open your full clip library")
                 .accessibilityLabel("Open full clip library")
-            }
+            }.help(store.connectionExplanation)
         }
         .padding(20)
     }
@@ -333,7 +333,7 @@ public struct ContentView: View {
     private var footer: some View {
         HStack(spacing: 6) {
             Image(systemName: "arrow.down.left").font(.system(size: 9, weight: .medium))
-            Text("Ready to receive").font(.system(size: 10))
+            Text(store.connectionSummary).font(.system(size: 10)).help(store.connectionExplanation)
             Spacer()
             Button("Quit") { NSApplication.shared.terminate(nil) }
                 .buttonStyle(.plain).font(.system(size: 10))
