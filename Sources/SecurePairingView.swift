@@ -23,11 +23,11 @@ struct SecurePairingView: View {
                     Label("QR expired", systemImage: "clock.badge.exclamationmark").font(.system(size: 13, weight: .semibold)).foregroundStyle(.orange)
                     Text("Generate a new QR to continue pairing. The previous code no longer works.").font(.system(size: 12)).foregroundStyle(.secondary)
                 }
-                if store.connectionState() == .connected || store.connectionState() == .offline {
+                if store.connectionState() == .connected || store.connectionState() == .awaitingActivity {
                     Text("Already paired. A QR is only needed to add another phone or pair again.")
                         .font(.system(size: 11)).foregroundStyle(.secondary)
                 }
-                Button(pairing.expired ? "Generate new QR" : (store.connectionState() == .connected || store.connectionState() == .offline ? "Add or re-pair a phone" : "Show pairing QR")) { store.updateLocalIP(); pairing.open(host: store.localIP, port: store.port) }.buttonStyle(GraphiteButtonStyle())
+                Button(pairing.expired ? "Generate new QR" : (store.connectionState() == .connected || store.connectionState() == .awaitingActivity ? "Add or re-pair a phone" : "Show pairing QR")) { store.updateLocalIP(); pairing.open(host: store.localIP, port: store.port) }.buttonStyle(GraphiteButtonStyle())
             }
             if let error = pairing.error { Text(error).font(.system(size: 11)).foregroundStyle(.red) }
         }

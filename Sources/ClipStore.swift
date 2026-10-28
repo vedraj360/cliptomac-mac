@@ -27,7 +27,7 @@ public struct PairedDevice: Identifiable, Codable, Equatable {
 }
 
 public enum DeviceConnectionState: Equatable {
-    case unpaired, securePairingRequired, offline, connected
+    case unpaired, securePairingRequired, awaitingActivity, connected
 }
 
 @MainActor
@@ -65,13 +65,15 @@ public class ClipStore: ObservableObject {
         guard !pairedDevices.isEmpty else { return .unpaired }
         let secure = pairedDevices.filter { $0.securePairing == true }
         guard !secure.isEmpty else { return .securePairingRequired }
-        return secure.contains { device in deviceLastSeen[device.id].map { now.timeIntervalSince($0) >= 0 && now.timeIntervalSince($0) < 60 } ?? false } ? .connected : .offline
+        return secure.contains { device in deviceLastSeen[device.id].map { now.timeIntervalSince($0) >= 0 && now.timeIntervalSince($0) < 60 } ?? false } ? .connected : .awaitingActivity
     }
     public var connectionSummary: String {
         switch connectionState() {
         case .unpaired: return "Not paired"
         case .securePairingRequired: return "Secure pairing required"
-        case .offline: return "Paired · not connected"
+        case .awaitingActivity:
+            let secure = pairedDevices.filter { $0.securePairing == true }
+            return secure.count == 1 ? "Paired · " + secure[0].name : "Paired · \(secure.count) phones"
         case .connected:
             let active = pairedDevices.filter { $0.securePairing == true && (deviceLastSeen[$0.id].map { Date().timeIntervalSince($0) >= 0 && Date().timeIntervalSince($0) < 60 } ?? false) }
             return active.count == 1 ? "Connected · " + active[0].name : "Connected · \(active.count) phones"
@@ -81,7 +83,7 @@ public class ClipStore: ObservableObject {
         switch connectionState() {
         case .unpaired: return "No phone is paired. Scan a pairing QR from the Android app."
         case .securePairingRequired: return "Your saved phone uses the older pairing. Scan a fresh QR once to enable encrypted transfers."
-        case .offline: return "No recent authenticated phone activity. Open ClipToMac on your phone and check that both devices are on the same Wi-Fi."
+        case .awaitingActivity: return "Your phone is paired. No recent phone activity; network availability has not been checked. Send from your phone to connect. Automatic receiving on Android only controls Mac-to-phone delivery."
         case .connected: return "Recent authenticated phone activity over the encrypted connection."
         }
     }
@@ -288,8 +290,8 @@ public class ClipStore: ObservableObject {
     }
     
     private func playReceiveCue() {
-        guard playSound, let cue = NSSound(named: "Tink")?.copy() as? NSSound else { return }
-        cue.volume = 0.35
+        guard playSound, let cue = NSSound(named: "Pop")?.copy() as? NSSound else { return }
+        cue.volume = 0.25
         cue.play()
     }
 
