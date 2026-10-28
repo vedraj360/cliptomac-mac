@@ -147,6 +147,7 @@ public class ClipStore: ObservableObject {
         
         loadTrustedDevices()
         loadClips()
+        repairAttachmentExtensions()
         sweepAttachmentDeletions()
         if systemIntegration {
             updateLocalIP(); requestNotificationPermission()
@@ -293,6 +294,11 @@ public class ClipStore: ObservableObject {
         guard playSound, let cue = NSSound(named: "Pop")?.copy() as? NSSound else { return }
         cue.volume = 0.25
         cue.play()
+    }
+
+    @discardableResult public func copyImageToClipboard(_ item: ClipItem) -> Bool {
+        guard item.kind == .image, let path = item.attachmentPath else { return false }
+        return AttachmentClipboard.copyImage(at: URL(fileURLWithPath: path))
     }
 
     public func copyToClipboard(_ item: ClipItem) {
@@ -487,6 +493,30 @@ public class ClipStore: ObservableObject {
         }
     }
     
+    private func repairAttachmentExtensions() {
+        let root = attachmentDirectory.resolvingSymlinksInPath().standardizedFileURL.path + "/"
+        let original = clips
+        var moves: [(URL, URL)] = []
+        for index in clips.indices where clips[index].direction == "received" {
+            guard let path = clips[index].attachmentPath else { continue }
+            let source = URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL
+            guard source.path.hasPrefix(root), source.pathExtension.isEmpty,
+                  FileManager.default.fileExists(atPath: source.path),
+                  let ext = AttachmentFilename.fileExtension(name: clips[index].attachmentName ?? "", mimeType: clips[index].mimeType) else { continue }
+            let target = source.appendingPathExtension(ext)
+            guard !FileManager.default.fileExists(atPath: target.path) else { continue }
+            do {
+                try FileManager.default.moveItem(at: source, to: target)
+                moves.append((source, target))
+                for reference in clips.indices where clips[reference].attachmentPath == path { clips[reference].attachmentPath = target.path }
+            } catch { print("Attachment filename repair deferred") }
+        }
+        if !moves.isEmpty && !saveClips() {
+            clips = original
+            for (source, target) in moves.reversed() { try? FileManager.default.moveItem(at: target, to: source) }
+        }
+    }
+
     private func loadClips() {
         guard let data = try? Data(contentsOf: storageURL),
               let loaded = try? JSONDecoder().decode([ClipItem].self, from: data) else {

@@ -67,8 +67,8 @@ final class BucketTransferStorage: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         let directory = try directory(owner, id)
         var receipt = try load(directory)
-        let safe = String(receipt.manifest.name.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "\\", with: "_").unicodeScalars.prefix(30).map(Character.init))
-        let stableName = TransferVerifier.digest(Data((owner + ":" + id).utf8)) + "-" + (safe.isEmpty ? "attachment" : safe)
+        let safe = AttachmentFilename.safeName(receipt.manifest.name, mimeType: receipt.manifest.mimeType)
+        let stableName = TransferVerifier.digest(Data((owner + ":" + id).utf8)) + "-" + safe
         let final = destination.appendingPathComponent(stableName)
         let part = directory.appendingPathComponent("payload.part")
         if receipt.finalPath == nil, !FileManager.default.fileExists(atPath: part.path), FileManager.default.fileExists(atPath: final.path),
@@ -91,6 +91,35 @@ final class BucketTransferStorage: @unchecked Sendable {
         do { try save(receipt, directory) } catch { try? FileManager.default.moveItem(at: final, to: part); throw error }
         return (receipt.manifest, final)
     }
+    /// Called only after history and its duplicate ledger have been saved successfully.
+    func retireCommitted(owner: String, id: String) throws {
+        lock.lock(); defer { lock.unlock() }
+        let folder = try directory(owner, id)
+        guard FileManager.default.fileExists(atPath: folder.path), try load(folder).finalPath != nil else { return }
+        try FileManager.default.removeItem(at: folder)
+        let parent = folder.deletingLastPathComponent()
+        if (try? FileManager.default.contentsOfDirectory(atPath: parent.path).isEmpty) == true {
+            try? FileManager.default.removeItem(at: parent)
+        }
+    }
+
+    /// Recover cleanup interrupted after a durable commit; leave unfinished transfers resumable.
+    func pruneCommitted(_ isCommitted: (String) -> Bool) {
+        lock.lock(); defer { lock.unlock() }
+        let manager = FileManager.default
+        for owner in (try? manager.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isSymbolicLinkKey])) ?? [] {
+            guard owner.lastPathComponent.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil,
+                  (try? owner.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true else { continue }
+            for folder in (try? manager.contentsOfDirectory(at: owner, includingPropertiesForKeys: [.isSymbolicLinkKey])) ?? [] {
+                guard (try? folder.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true,
+                      isCommitted(String(owner.lastPathComponent.prefix(16)) + "-" + folder.lastPathComponent),
+                      let receipt = try? load(folder), receipt.finalPath != nil else { continue }
+                try? manager.removeItem(at: folder)
+            }
+            if (try? manager.contentsOfDirectory(atPath: owner.path).isEmpty) == true { try? manager.removeItem(at: owner) }
+        }
+    }
+
     func cancel(owner: String, id: String) throws {
         lock.lock(); defer { lock.unlock() }
         let directory = try directory(owner, id)

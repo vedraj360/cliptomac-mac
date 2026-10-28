@@ -11,7 +11,7 @@ mkdir -p "$MACOS_DIR"
 mkdir -p "$RESOURCES_DIR"
 cp "Assets/AppIcon.icns" "$RESOURCES_DIR/AppIcon.icns"
 if [ -d "Assets/BrandIcons" ]; then
-    cp -R "Assets/BrandIcons" "$RESOURCES_DIR/BrandIcons"
+    ditto "Assets/BrandIcons" "$RESOURCES_DIR/BrandIcons"
 fi
 
 swiftc -O -whole-module-optimization \

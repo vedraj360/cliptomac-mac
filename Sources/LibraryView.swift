@@ -151,6 +151,7 @@ struct LibraryView: View {
                 if clip.kind == .text { Text(clip.text).font(.system(size:13)).lineSpacing(3).lineLimit(4).textSelection(.enabled) } else { Label(clip.attachmentName ?? clip.kind.rawValue,systemImage:clip.kind == .image ? "photo":"doc").font(.system(size:13)); if let p=clip.attachmentPath { Text(p).font(.system(size:10)).foregroundStyle(.secondary).lineLimit(1) } }
                 HStack(spacing:14) {
                     if clip.kind == .text { Button("Copy"){ store.copyToClipboard(clip) }.buttonStyle(.plain) }
+                    if clip.kind == .image { Button("Copy image") { notice = store.copyImageToClipboard(clip) ? "Image copied. Paste with ⌘V." : "Couldn’t copy image. The file may be missing or unreadable." }.buttonStyle(.plain) }
                     if clip.isURL, let url=URL(string:clip.text) { Button("Open"){ NSWorkspace.shared.open(url) }.buttonStyle(.plain) }
                     if let path=clip.attachmentPath { Button("Reveal"){ NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath:path)]) }.buttonStyle(.plain); Button("Open"){ NSWorkspace.shared.open(URL(fileURLWithPath:path)) }.buttonStyle(.plain) }
                     Spacer()

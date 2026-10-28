@@ -8,6 +8,10 @@ extension HTTPServer {
         let owner = device.id
         if req.method == "POST", req.path == "/buckets/start" {
             guard let manifest = try? JSONDecoder().decode(TransferManifest.self, from: req.body) else { respond(fd, 400, ["error": "Invalid manifest"]); return true }
+            do { try manifest.validate() } catch { respond(fd, 400, ["error": "Invalid manifest"]); return true }
+            if ClipStore.shared.seenTransferAttempt(TransferIdentity.scoped(owner: owner, id: manifest.transferId)) {
+                respond(fd, 200, ["received": [Int](), "complete": true]); return true
+            }
             Task.detached {
                 do {
                     let receipt = try BucketTransferStorage.shared.start(manifest, owner: owner)
@@ -50,6 +54,10 @@ extension HTTPServer {
                         let scopedID = String(TransferVerifier.digest(Data(owner.utf8)).prefix(16)) + "-" + manifest.transferId
                         if ClipStore.shared.seenTransferAttempt(scopedID) { return true }
                         return ClipStore.shared.addTransferredItem(id: scopedID, text: "", appName: manifest.app, packageName: manifest.package, timestamp: Date(timeIntervalSince1970: Double(manifest.timestamp) / 1000), kind: manifest.kind, mimeType: manifest.mimeType, attachmentName: manifest.name, attachmentPath: file.path, direction: "received", sourceDeviceId: owner, contentHash: manifest.sha256)
+                    }
+                    if saved {
+                        do { try BucketTransferStorage.shared.retireCommitted(owner: owner, id: pieces[1]) }
+                        catch { print("Completed transfer cleanup will retry at launch") }
                     }
                     await MainActor.run { MacTransferService.shared.incomingState(owner: owner, transferID: pieces[1], state: saved ? "complete" : "failed") }
                     self.respond(fd, saved ? 200 : 500, ["status": saved ? "complete" : "Could not save received file"])

@@ -8,6 +8,7 @@ public struct ContentView: View {
     @State private var search = ""
     @State private var settings = false
     @State private var copiedID: UUID?
+    @State private var copyErrorID: UUID?
     @State private var confirmClear = false
     @State private var deleteClearFiles = false
     @State private var unpairTarget: PairedDevice?
@@ -226,17 +227,26 @@ public struct ContentView: View {
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
             HStack(spacing: 14) {
-                Button {
-                    if clip.kind == .text { store.copyToClipboard(clip) }
-                    else if let path = clip.attachmentPath { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }
-                    copiedID = clip.id
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                        if copiedID == clip.id { copiedID = nil }
-                    }
-                } label: {
-                    Label(clip.kind == .text ? (copiedID == clip.id ? "Copied" : "Copy") : "Reveal", systemImage: copiedID == clip.id ? "checkmark" : "doc.on.doc")
+                if clip.kind == .text || clip.kind == .image {
+                    Button {
+                        let success: Bool
+                        if clip.kind == .image { success = store.copyImageToClipboard(clip) }
+                        else { store.copyToClipboard(clip); success = true }
+                        if success { copiedID = clip.id; copyErrorID = nil }
+                        else { copyErrorID = clip.id }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                            if copiedID == clip.id { copiedID = nil }
+                            if copyErrorID == clip.id { copyErrorID = nil }
+                        }
+                    } label: {
+                        Label(copyErrorID == clip.id ? "Couldn’t copy" : (copiedID == clip.id ? "Copied" : (clip.kind == .image ? "Copy image" : "Copy")), systemImage: copiedID == clip.id ? "checkmark" : "doc.on.doc")
+                    }.foregroundStyle(copyErrorID == clip.id ? Color.orange : (copiedID == clip.id ? Color.green : Color.primary))
                 }
-                .foregroundStyle(copiedID == clip.id ? Color.green : Color.primary)
+                if let path = clip.attachmentPath {
+                    Button { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) } label: {
+                        Label("Reveal", systemImage: "folder")
+                    }
+                }
                 if clip.isURL, let url = URL(string: clip.text.trimmingCharacters(in: .whitespacesAndNewlines)) {
                     Button { NSWorkspace.shared.open(url) } label: {
                         Label("Open", systemImage: "arrow.up.right")

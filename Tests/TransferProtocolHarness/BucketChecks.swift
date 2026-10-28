@@ -25,6 +25,15 @@ extension Harness {
         precondition(verifiedHash == manifest.sha256)
         let (_, retriedFile) = try BucketTransferStorage(root: root).complete(owner: "a", id: manifest.transferId, destination: destination)
         precondition(file == retriedFile, "retry created a second completed file")
+        for name in ["Screenshot_2026-10-27-18-01-49-38_8d0656beae16965edc8a4b879c1ffbb0.jpg", String(repeating: "界", count: 200) + ".png", "../../escape.mp4"] {
+            let safe = AttachmentFilename.safeName(name, mimeType: "image/jpeg")
+            precondition((safe as NSString).pathExtension == (name as NSString).pathExtension, "Filename lost its extension")
+            precondition(safe.utf8.count <= 180 && !safe.contains("/"), "Unsafe or oversized filename")
+        }
+        precondition(["jpg", "jpeg"].contains((AttachmentFilename.safeName("photo", mimeType: "image/jpeg") as NSString).pathExtension))
+        try reloaded.retireCommitted(owner: "a", id: manifest.transferId)
+        precondition(FileManager.default.fileExists(atPath: file.path), "Cleanup removed the saved attachment")
+        precondition(!FileManager.default.fileExists(atPath: root.appendingPathComponent(TransferVerifier.digest(Data("a".utf8))).appendingPathComponent(manifest.transferId).path), "Cleanup left a completed receipt directory")
         let sparse = TransferManifest(protocolVersion: 2, transferId: "offset-over-5gib", size: 5 * 1024 * 1024 * 1024 + 123, bucketSize: TransferManifest.bucketBytes, sha256: String(repeating: "0", count: 64), kind: "file", mimeType: "application/octet-stream", name: "large.bin", app: "Test", package: "test", timestamp: 1)
         _ = try storage.start(sparse, owner: "a")
         let tail = Data(repeating: 77, count: 123)
@@ -55,6 +64,11 @@ extension Harness {
         precondition(status(complete) == 200, "bucket commit failed")
         let repeated = try await request("POST", "/buckets/bucket-fixture/complete")
         precondition(status(repeated) == 200, "commit retry was not idempotent")
+        let replayStart = try await request("POST", "/buckets/start", meta)
+        precondition(status(replayStart) == 200)
+        let replayBody = try JSONSerialization.jsonObject(with: Data(replayStart.suffix(from: replayStart.range(of: Data("\r\n\r\n".utf8))!.upperBound))) as! [String: Any]
+        precondition(replayBody["complete"] as? Bool == true, "Cleaned transfer was not recognized on retry")
+        print("PASS filenames preserve extensions; committed receipt cleanup keeps attachments; start retry stays complete")
         print("PASS buckets: parallel HTTP upload, checksums, restart resume, duplicate receipts/commit, device isolation, missing-bucket rejection, >5 GiB sparse offset")
     }
 }

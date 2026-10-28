@@ -9,6 +9,31 @@ import AppKit
         prefs.set(false, forKey: "autoCopy"); prefs.set(false, forKey: "showNotifications"); prefs.set(false, forKey: "playSound")
         defer { try? FileManager.default.removeItem(at: root); prefs.removePersistentDomain(forName: suite) }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let repairRoot = root.appendingPathComponent("extension-repair")
+        let repairDir = repairRoot.appendingPathComponent("attachments")
+        try FileManager.default.createDirectory(at: repairDir, withIntermediateDirectories: true)
+        let broken = repairDir.appendingPathComponent("hash-Screenshot_2026-10-27")
+        try Data([0xff, 0xd8, 0xff]).write(to: broken)
+        let repairClip = ClipItem(text: "", kind: .image, mimeType: "image/jpeg", attachmentName: "Screenshot_2026-10-27-long-name.jpg", attachmentPath: broken.path)
+        try JSONEncoder().encode([repairClip]).write(to: repairRoot.appendingPathComponent("history.json"))
+        let repaired = ClipStore(storageDirectory: repairRoot, preferences: prefs, systemIntegration: false)
+        precondition(repaired.clips[0].attachmentPath == broken.appendingPathExtension("jpg").path, "Existing filename extension was not repaired")
+        precondition(FileManager.default.fileExists(atPath: repaired.clips[0].attachmentPath!))
+        let repairedReload = ClipStore(storageDirectory: repairRoot, preferences: prefs, systemIntegration: false)
+        precondition(repairedReload.clips[0].attachmentPath == repaired.clips[0].attachmentPath, "Repaired history was not persisted")
+        print("PASS missing attachment extension repaired and persisted without duplicating data")
+        let clipboardImage = root.appendingPathComponent("clipboard-test.png")
+        let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 2, pixelsHigh: 2, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 8, bitsPerPixel: 32)!
+        bitmap.setColor(.red, atX: 0, y: 0)
+        try bitmap.representation(using: .png, properties: [:])!.write(to: clipboardImage)
+        let pasteboard = NSPasteboard.withUniqueName()
+        defer { pasteboard.releaseGlobally() }
+        precondition(AttachmentClipboard.copyImage(at: clipboardImage, to: pasteboard))
+        precondition(pasteboard.availableType(from: [.tiff, .png]) != nil, "Copied image did not supply image data")
+        let changeCount = pasteboard.changeCount
+        precondition(!AttachmentClipboard.copyImage(at: root.appendingPathComponent("missing.png"), to: pasteboard))
+        precondition(pasteboard.changeCount == changeCount, "Failed image copy erased the clipboard")
+        print("PASS image copy supplies image data; missing files leave clipboard intact")
         let oldID = UUID()
         let legacy: [[String: Any]] = [["id":oldID.uuidString,"text":"old text","appName":"Brave","packageName":"com.brave.browser","timestamp":0]]
         try JSONSerialization.data(withJSONObject: legacy).write(to: root.appendingPathComponent("history.json"))
