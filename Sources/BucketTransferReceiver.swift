@@ -6,6 +6,10 @@ extension HTTPServer {
         guard req.path.hasPrefix("/buckets/") else { return false }
         let pieces = req.path.split(separator: "/").map(String.init)
         let owner = device.id
+        if req.method == "GET", pieces.count == 3, pieces[2] == "control" {
+            guard pieces[1].range(of: "^[A-Za-z0-9_-]{1,128}$", options: .regularExpression) != nil else { respond(fd, 400, ["error": "Invalid transfer ID"]); return true }
+            respond(fd, 200, ["state": IncomingTransferControls.shared.state(owner: owner, id: pieces[1])]); return true
+        }
         if req.method == "POST", req.path == "/buckets/start" {
             guard let manifest = try? JSONDecoder().decode(TransferManifest.self, from: req.body) else { respond(fd, 400, ["error": "Invalid manifest"]); return true }
             do { try manifest.validate() } catch { respond(fd, 400, ["error": "Invalid manifest"]); return true }
@@ -14,7 +18,10 @@ extension HTTPServer {
             }
             Task.detached {
                 do {
-                    let receipt = try BucketTransferStorage.shared.start(manifest, owner: owner)
+                    try IncomingTransferControls.shared.receiving(owner: owner, id: manifest.transferId) { }
+                    var receipt = try BucketTransferStorage.shared.start(manifest, owner: owner)
+                    // Only a committed history/ledger entry is a completed delivery.
+                    receipt["complete"] = false
                     let indices = receipt["received"] as? [Int] ?? []
                     let bytes = indices.reduce(Int64(0)) { $0 + Int64((try? manifest.length($1)) ?? 0) }
                     await MainActor.run {
@@ -28,6 +35,7 @@ extension HTTPServer {
                     }
                     self.respond(fd, 200, receipt)
                 }
+                catch let error as IncomingTransferControls.ControlError { self.respond(fd, error.status, ["error": error.localizedDescription]) }
                 catch { self.respond(fd, 400, ["error": error.localizedDescription]) }
             }
         } else if req.method == "PUT", pieces.count == 3, let index = Int(pieces[2]) {
@@ -39,6 +47,7 @@ extension HTTPServer {
                     await MainActor.run { MacTransferService.shared.updateIncoming(manifest, device: device, bytes: bytes) }
                     self.respond(fd, 200, ["status": "ok"])
                 }
+                catch let error as IncomingTransferControls.ControlError { self.respond(fd, error.status, ["error": error.localizedDescription]) }
                 catch { self.respond(fd, 400, ["error": error.localizedDescription]) }
             }
         } else if req.method == "POST", pieces.count == 3, pieces[2] == "complete" {
@@ -61,6 +70,8 @@ extension HTTPServer {
                     }
                     await MainActor.run { MacTransferService.shared.incomingState(owner: owner, transferID: pieces[1], state: saved ? "complete" : "failed") }
                     self.respond(fd, saved ? 200 : 500, ["status": saved ? "complete" : "Could not save received file"])
+                } catch let error as IncomingTransferControls.ControlError {
+                    self.respond(fd, error.status, ["error": error.localizedDescription])
                 } catch {
                     await MainActor.run { MacTransferService.shared.incomingState(owner: owner, transferID: pieces[1], state: "failed", error: error.localizedDescription) }
                     self.respond(fd, 400, ["error": error.localizedDescription])
@@ -68,7 +79,12 @@ extension HTTPServer {
             }
         } else if req.method == "DELETE", pieces.count == 2 {
             Task.detached {
-                do { try BucketTransferStorage.shared.cancel(owner: owner, id: pieces[1]); await MainActor.run { MacTransferService.shared.incomingState(owner: owner, transferID: pieces[1], state: "cancelled") }; self.respond(fd, 200, ["status": "cancelled"]) }
+                do {
+                    if IncomingTransferControls.shared.state(owner: owner, id: pieces[1]) != "cancelled" {
+                        try IncomingTransferControls.shared.set(owner: owner, id: pieces[1], state: "cancelled")
+                    }
+                    try BucketTransferStorage.shared.cancel(owner: owner, id: pieces[1]); await MainActor.run { MacTransferService.shared.incomingState(owner: owner, transferID: pieces[1], state: "cancelled") }; self.respond(fd, 200, ["status": "cancelled"]) }
+                catch let error as IncomingTransferControls.ControlError { self.respond(fd, error.status, ["error": error.localizedDescription]) }
                 catch { self.respond(fd, 400, ["error": error.localizedDescription]) }
             }
         } else if req.method == "GET", pieces.count == 4, pieces[1] == "download",
@@ -85,7 +101,8 @@ extension HTTPServer {
                         let hash = TransferVerifier.digest(bytes)
                         self.respond(fd, 200, raw: bytes, contentType: "application/octet-stream", extraHeaders: ["X-Bucket-SHA256": hash])
                         await MainActor.run { MacTransferService.shared.updateBucketProgress(id: pieces[2], index: index, manifest: manifest) }
-                    } catch { self.respond(fd, 400, ["error": error.localizedDescription]) }
+                    } catch let error as IncomingTransferControls.ControlError { self.respond(fd, error.status, ["error": error.localizedDescription]) }
+                catch { self.respond(fd, 400, ["error": error.localizedDescription]) }
                 }
             } else { respond(fd, 400, ["error": "Invalid bucket index"]) }
         } else { respond(fd, 404, ["error": "Bucket transfer unavailable"]) }

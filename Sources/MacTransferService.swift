@@ -26,6 +26,7 @@ public final class MacTransferService: ObservableObject {
     public static let maxBytes: Int64 = 25 * 1024 * 1024
     @Published public private(set) var outboundItems: [FileTransferStatus] = []
     @Published public private(set) var incomingItems: [FileTransferStatus] = []
+    @Published public private(set) var controlError: String?
     private var records: [OutboundRecord] = []
     private var rates = TransferRateEstimator()
     private var servedBuckets: [String: Set<Int>] = [:]
@@ -107,10 +108,21 @@ public final class MacTransferService: ObservableObject {
         return id
     }
 
+    func restoreIncomingTransfers() {
+        for device in ClipStore.shared.pairedDevices where device.securePairing == true {
+            for (manifest, bytes) in BucketTransferStorage.shared.pending(owner: device.id) {
+                let state = IncomingTransferControls.shared.state(owner: device.id, id: manifest.transferId)
+                guard state != "cancelled" else { continue }
+                updateIncoming(manifest, device: device, bytes: bytes)
+                incomingState(owner: device.id, transferID: manifest.transferId, state: state == "paused" ? "paused" : "waiting for phone")
+            }
+        }
+    }
+
     func updateIncoming(_ manifest: TransferManifest, device: PairedDevice, bytes: Int64) {
         let id = String(TransferVerifier.digest(Data(device.id.utf8)).prefix(16)) + "-" + manifest.transferId
         let previous = incomingItems.first(where: { $0.id == id })
-        if let previous, ["verifying", "complete", "cancelled"].contains(previous.state) { return }
+        if let previous, ["paused", "verifying", "complete", "cancelled"].contains(previous.state) { return }
         let value = max(previous?.bytesSent ?? 0, bytes)
         let sample = rates.sample(id, bytes: value, total: manifest.size)
         let item = FileTransferStatus(id: id, deviceID: device.id, deviceName: device.name, name: manifest.name, bytesSent: value, totalBytes: manifest.size, state: "receiving", error: nil, createdAt: previous?.createdAt ?? Date(), bytesPerSecond: sample.0, estimatedSecondsRemaining: sample.1, direction: "received")
@@ -121,7 +133,9 @@ public final class MacTransferService: ObservableObject {
         if ["complete", "cancelled", "failed"].contains(state) { IncomingByteProgress.shared.finish(owner: owner, id: transferID) }
         let id = String(TransferVerifier.digest(Data(owner.utf8)).prefix(16)) + "-" + transferID
         guard let index = incomingItems.firstIndex(where: { $0.id == id }) else { return }
-        let old = incomingItems[index]; rates.reset(id)
+        let old = incomingItems[index]
+        if ["complete", "cancelled"].contains(old.state) { return }
+        rates.reset(id)
         incomingItems[index] = FileTransferStatus(id: id, deviceID: old.deviceID, deviceName: old.deviceName, name: old.name, bytesSent: state == "complete" ? old.totalBytes : old.bytesSent, totalBytes: old.totalBytes, state: state, error: error, createdAt: old.createdAt, direction: "received")
     }
 
@@ -133,6 +147,9 @@ public final class MacTransferService: ObservableObject {
     }
 
     public func togglePause(id: String) {
+        if let item = incomingItems.first(where: { $0.id == id }) {
+            changeIncoming(item, state: item.state == "paused" ? "receiving" : "paused"); return
+        }
         guard let index = records.firstIndex(where: { $0.transferId == id }) else { return }
         let previous = records[index].paused
         records[index].paused = previous != true
@@ -142,11 +159,30 @@ public final class MacTransferService: ObservableObject {
     }
 
     public func cancel(id: String) {
+        if let item = incomingItems.first(where: { $0.id == id }) {
+            changeIncoming(item, state: "cancelled"); return
+        }
         let previous = records
         records.removeAll { $0.transferId == id }
         do { try persistThrowing() } catch { records = previous; return }
         cancelled.insert(id)
         setStatus(id: id, state: "cancelled")
+    }
+
+    private func changeIncoming(_ item: FileTransferStatus, state: String) {
+        guard ["receiving", "paused", "failed", "waiting for phone"].contains(item.state) else { return }
+        let transferID = String(item.id.dropFirst(17))
+        do {
+            try IncomingTransferControls.shared.set(owner: item.deviceID, id: transferID, state: state)
+            controlError = nil
+            incomingState(owner: item.deviceID, transferID: transferID, state: state)
+            if state == "cancelled" {
+                Task.detached {
+                    do { try BucketTransferStorage.shared.cancel(owner: item.deviceID, id: transferID) }
+                    catch { await MainActor.run { self.controlError = "Transfer cancelled; temporary file cleanup will retry." } }
+                }
+            }
+        } catch { controlError = "Couldn’t change transfer: " + error.localizedDescription }
     }
 
     public func updateProgress(id: String, bytes: Int64) { if records.first(where: { $0.transferId == id })?.paused == true { return }; let total = outboundItems.first(where: { $0.id == id })?.totalBytes ?? 0; setStatus(id: id, state: bytes >= total ? "verifying on phone" : "sending", bytes: bytes) }

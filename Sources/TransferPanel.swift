@@ -20,10 +20,10 @@ struct TransferPanel: View {
                         HStack {
                             Text("\(ByteCountFormatter.string(fromByteCount: item.bytesSent, countStyle: .file)) / \(ByteCountFormatter.string(fromByteCount: item.totalBytes, countStyle: .file))")
                             Spacer()
-                            Text(item.state == "verifying" ? "Verifying checksum…" : item.bytesPerSecond > 0 ? "\(ByteCountFormatter.string(fromByteCount: Int64(item.bytesPerSecond), countStyle: .file))/s" : "Measuring speed…")
-                            Text(item.state == "verifying" ? "" : item.estimatedSecondsRemaining.map { "ETA \(Int($0) / 60)m \(Int($0) % 60)s" } ?? "ETA calculating…")
+                            Text(item.state == "paused" ? "Paused" : item.state == "verifying" ? "Verifying checksum…" : item.bytesPerSecond > 0 ? "\(ByteCountFormatter.string(fromByteCount: Int64(item.bytesPerSecond), countStyle: .file))/s" : "Measuring speed…")
+                            Text(["paused", "verifying"].contains(item.state) ? "" : item.estimatedSecondsRemaining.map { "ETA \(Int($0) / 60)m \(Int($0) % 60)s" } ?? "ETA calculating…")
                         }.monospacedDigit().foregroundStyle(.secondary)
-                        if item.direction == "sent" {
+                        if item.direction == "sent" || ["receiving", "paused", "failed", "waiting for phone"].contains(item.state) {
                             HStack {
                                 Button(item.state == "paused" ? "Resume" : "Pause") { transfers.togglePause(id: item.id) }
                                 Button("Cancel") { transfers.cancel(id: item.id) }
@@ -31,6 +31,7 @@ struct TransferPanel: View {
                         }
                     }.font(.system(size: 10))
                 }
+                if let error = transfers.controlError { Text(error).foregroundStyle(.orange) }
             }.padding(compact ? 14 : 12).background(.primary.opacity(0.04))
         }
     }

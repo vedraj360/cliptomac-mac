@@ -54,7 +54,14 @@ PLIST
 echo "✅ Build complete: $BUNDLE_DIR"
 
 # Certificate signing is opt-in. Set this only after the developer authorizes that identity.
-APP_SIGN_IDENTITY="${CLIPTOMAC_SIGN_IDENTITY:-}"
+# The ignored local identity file is written only after explicit developer approval.
+if [ "${CLIPTOMAC_SIGN_IDENTITY+x}" = x ]; then
+    APP_SIGN_IDENTITY="$CLIPTOMAC_SIGN_IDENTITY"
+elif [ -f .local-signing-identity ]; then
+    APP_SIGN_IDENTITY="$(cat .local-signing-identity)"
+else
+    APP_SIGN_IDENTITY=""
+fi
 if [ -n "$APP_SIGN_IDENTITY" ]; then
     codesign --force --options runtime --identifier com.vdx.cliptomac --sign "$APP_SIGN_IDENTITY" "$BUNDLE_DIR"
     codesign --verify --strict "$BUNDLE_DIR"

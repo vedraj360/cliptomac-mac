@@ -13,7 +13,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         Self.shared = self
-        BucketTransferStorage.shared.pruneCommitted { ClipStore.shared.seenTransferAttempt($0) }
+        BucketTransferStorage.shared.pruneCommitted({ ClipStore.shared.seenTransferAttempt($0) }, isCancelled: { IncomingTransferControls.shared.isCancelled(scopedID: $0) })
+        MacTransferService.shared.restoreIncomingTransfers()
         HTTPServer.shared.start(port: ClipStore.shared.port)
         UDPDiscoveryServer.shared.start(port: 5679)
         ShortcutManager.shared.register()

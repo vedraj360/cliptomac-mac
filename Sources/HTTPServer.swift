@@ -256,7 +256,7 @@ public final class HTTPServer {
     }
     private func writeResponse(_ fd: Int32, _ status: Int, _ body: Data, _ contentType: String, _ extraHeaders: [String: String]) {
         defer { close(fd); connectionSlots.signal() }
-        let label = [200: "OK", 204: "No Content", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found", 429: "Too Many Requests", 500: "Internal Server Error"][status] ?? "Error"
+        let label = [200: "OK", 204: "No Content", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found", 410: "Gone", 423: "Locked", 429: "Too Many Requests", 500: "Internal Server Error"][status] ?? "Error"
         let extra = extraHeaders.map { "\($0.key): \($0.value)\r\n" }.joined()
         let head = Data("HTTP/1.1 \(status) \(label)\r\nContent-Type: \(contentType)\r\nContent-Length: \(body.count)\r\nConnection: close\r\n\(extra)Cache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n\r\n".utf8)
         func write(_ data: Data) -> Bool {

@@ -47,6 +47,7 @@ final class BucketTransferStorage: @unchecked Sendable {
     @discardableResult func put(owner: String, id: String, index: Int, bytes: Data, checksum: String) throws -> (TransferManifest, Int64) {
         guard checksum == TransferVerifier.digest(bytes) else { throw BucketError.invalid("Bucket checksum mismatch") }
         lock.lock(); defer { lock.unlock() }
+        return try IncomingTransferControls.shared.receiving(owner: owner, id: id) {
         let directory = try directory(owner, id)
         var receipt = try load(directory)
         guard try receipt.manifest.length(index) == bytes.count else { throw BucketError.invalid("Incorrect bucket length") }
@@ -62,9 +63,11 @@ final class BucketTransferStorage: @unchecked Sendable {
         receipt.received[index] = checksum
         try save(receipt, directory)
         return (receipt.manifest, receipt.received.keys.reduce(0) { $0 + Int64((try? receipt.manifest.length($1)) ?? 0) })
+        }
     }
     func complete(owner: String, id: String, destination: URL) throws -> (TransferManifest, URL) {
         lock.lock(); defer { lock.unlock() }
+        return try IncomingTransferControls.shared.receiving(owner: owner, id: id) {
         let directory = try directory(owner, id)
         var receipt = try load(directory)
         let safe = AttachmentFilename.safeName(receipt.manifest.name, mimeType: receipt.manifest.mimeType)
@@ -90,7 +93,19 @@ final class BucketTransferStorage: @unchecked Sendable {
         receipt.finalPath = final.path
         do { try save(receipt, directory) } catch { try? FileManager.default.moveItem(at: final, to: part); throw error }
         return (receipt.manifest, final)
+        }
     }
+    func pending(owner: String) -> [(TransferManifest, Int64)] {
+        lock.lock(); defer { lock.unlock() }
+        let folder = root.appendingPathComponent(TransferVerifier.digest(Data(owner.utf8)))
+        return ((try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.isSymbolicLinkKey])) ?? []).compactMap { child in
+            guard (try? child.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true,
+                  let receipt = try? load(child), receipt.finalPath == nil else { return nil }
+            let bytes = receipt.received.keys.reduce(Int64(0)) { $0 + Int64((try? receipt.manifest.length($1)) ?? 0) }
+            return (receipt.manifest, bytes)
+        }
+    }
+
     /// Called only after history and its duplicate ledger have been saved successfully.
     func retireCommitted(owner: String, id: String) throws {
         lock.lock(); defer { lock.unlock() }
@@ -104,7 +119,7 @@ final class BucketTransferStorage: @unchecked Sendable {
     }
 
     /// Recover cleanup interrupted after a durable commit; leave unfinished transfers resumable.
-    func pruneCommitted(_ isCommitted: (String) -> Bool) {
+    func pruneCommitted(_ isCommitted: (String) -> Bool, isCancelled: (String) -> Bool = { _ in false }) {
         lock.lock(); defer { lock.unlock() }
         let manager = FileManager.default
         for owner in (try? manager.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isSymbolicLinkKey])) ?? [] {
@@ -112,8 +127,9 @@ final class BucketTransferStorage: @unchecked Sendable {
                   (try? owner.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true else { continue }
             for folder in (try? manager.contentsOfDirectory(at: owner, includingPropertiesForKeys: [.isSymbolicLinkKey])) ?? [] {
                 guard (try? folder.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true,
-                      isCommitted(String(owner.lastPathComponent.prefix(16)) + "-" + folder.lastPathComponent),
-                      let receipt = try? load(folder), receipt.finalPath != nil else { continue }
+                      let receipt = try? load(folder) else { continue }
+                let scopedID = String(owner.lastPathComponent.prefix(16)) + "-" + folder.lastPathComponent
+                guard (receipt.finalPath != nil && isCommitted(scopedID)) || (receipt.finalPath == nil && isCancelled(scopedID)) else { continue }
                 try? manager.removeItem(at: folder)
             }
             if (try? manager.contentsOfDirectory(atPath: owner.path).isEmpty) == true { try? manager.removeItem(at: owner) }

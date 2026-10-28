@@ -10,3 +10,5 @@
 .env.*
 ClipToMac.app/
 .build/
+
+.local-signing-identity

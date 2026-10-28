@@ -42,11 +42,51 @@ extension Harness {
         precondition(largeReceipt["received"] as? [Int] == [sparse.bucketCount - 1], "64-bit bucket offset failed")
         try storage.cancel(owner: "a", id: sparse.transferId)
 
+        let controlled = TransferManifest(protocolVersion: 2, transferId: "receiver-controls", size: 3, bucketSize: TransferManifest.bucketBytes, sha256: TransferVerifier.digest(Data([1,2,3])), kind: "file", mimeType: "application/octet-stream", name: "controlled.bin", app: "Test", package: "test", timestamp: 1)
+        _ = try storage.start(controlled, owner: "a")
+        let controls = IncomingTransferControls.shared
+        try controls.set(owner: "a", id: controlled.transferId, state: "paused")
+        precondition(storage.pending(owner: "a").contains(where: { $0.0.transferId == controlled.transferId }), "Paused transfer was not restorable")
+        precondition(controls.state(owner: "b", id: controlled.transferId) == "receiving", "Controls leaked between devices")
+        do { try storage.put(owner: "a", id: controlled.transferId, index: 0, bytes: Data([1,2,3]), checksum: controlled.sha256); fatalError("Paused receiver accepted data") } catch IncomingTransferControls.ControlError.paused { }
+        try controls.set(owner: "a", id: controlled.transferId, state: "receiving")
+        try storage.put(owner: "a", id: controlled.transferId, index: 0, bytes: Data([1,2,3]), checksum: controlled.sha256)
+        try controls.set(owner: "a", id: controlled.transferId, state: "cancelled")
+        do { _ = try storage.complete(owner: "a", id: controlled.transferId, destination: destination); fatalError("Cancelled receiver committed a file") } catch IncomingTransferControls.ControlError.cancelled { }
+        do { try controls.set(owner: "a", id: controlled.transferId, state: "receiving"); fatalError("Cancelled receiver restarted") } catch IncomingTransferControls.ControlError.cancelled { }
+        storage.pruneCommitted({ _ in false }, isCancelled: { controls.isCancelled(scopedID: $0) })
+        let cancelledFolder = root.appendingPathComponent(TransferVerifier.digest(Data("a".utf8))).appendingPathComponent(controlled.transferId)
+        precondition(!FileManager.default.fileExists(atPath: cancelledFolder.path), "Cancelled payload survived cleanup")
+        let isolatedControls = IncomingTransferControls(directory: root.appendingPathComponent("controls"))
+        try isolatedControls.set(owner: "a", id: "persisted", state: "paused")
+        precondition(IncomingTransferControls(directory: root.appendingPathComponent("controls")).state(owner: "a", id: "persisted") == "paused")
+        print("PASS receiver controls: pause blocks writes, resume accepts data, cancel rejects commit/retry, cleanup, persistence, owner isolation")
+
         @Sendable func request(_ method: String, _ path: String, _ data: Data = Data(), token: String = "token-a", checksum: String? = nil, fragment: Int = Int.max) async throws -> Data {
             let extra = checksum.map { "X-Bucket-SHA256: \($0)\r\n" } ?? ""
             let head = Data("\(method) \(path) HTTP/1.1\r\nHost: localhost\r\nX-ClipToMac-Token: \(token)\r\n\(extra)Content-Length: \(data.count)\r\n\r\n".utf8)
             return try await requestAsync(head + data, fragmentSize: fragment)
         }
+        let uiManifest = TransferManifest(protocolVersion: 2, transferId: "ui-controls", size: 3, bucketSize: TransferManifest.bucketBytes, sha256: TransferVerifier.digest(Data([1,2,3])), kind: "file", mimeType: "application/octet-stream", name: "ui.bin", app: "Test", package: "test", timestamp: 1)
+        let uiStarted = try await request("POST", "/buckets/start", JSONEncoder().encode(uiManifest))
+        precondition(status(uiStarted) == 200)
+        let uiID = TransferIdentity.scoped(owner: "test-a", id: uiManifest.transferId)
+        MacTransferService.shared.togglePause(id: uiID)
+        precondition(MacTransferService.shared.incomingItems.first(where: { $0.id == uiID })?.state == "paused")
+        let pausedPut = try await request("PUT", "/buckets/ui-controls/0", Data([1,2,3]), checksum: uiManifest.sha256)
+        precondition(status(pausedPut) == 423, "UI pause did not block HTTP data")
+        MacTransferService.shared.togglePause(id: uiID)
+        let resumedPut = try await request("PUT", "/buckets/ui-controls/0", Data([1,2,3]), checksum: uiManifest.sha256)
+        precondition(status(resumedPut) == 200, "UI resume did not allow HTTP data")
+        MacTransferService.shared.cancel(id: uiID)
+        let cancelledCommit = try await request("POST", "/buckets/ui-controls/complete")
+        precondition(status(cancelledCommit) == 410, "UI cancel still allowed a commit")
+        precondition(MacTransferService.shared.incomingItems.first(where: { $0.id == uiID })?.state == "cancelled", "Late completion overrode cancel")
+        print("PASS Mac button actions: pause/resume/cancel reflected by real HTTP upload responses")
+        let controlResponse = try await request("GET", "/buckets/receiver-controls/control")
+        precondition(status(controlResponse) == 200)
+        let controlsBody = try JSONSerialization.jsonObject(with: Data(controlResponse.suffix(from: controlResponse.range(of: Data("\r\n\r\n".utf8))!.upperBound))) as! [String: Any]
+        precondition(controlsBody["state"] as? String == "receiving", "HTTP controls exposed a different owner's state")
         let meta = try JSONEncoder().encode(manifest)
         let created = try await request("POST", "/buckets/start", meta)
         precondition(status(created) == 200)
