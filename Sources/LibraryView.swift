@@ -2,8 +2,6 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
-private enum LibraryFilter: Hashable { case all, pinned, sent, received, text, images, files, collection(String), app(KnownApp) }
-
 struct LibraryView: View {
     @Environment(\.colorScheme) private var colorScheme
     @ObservedObject private var store = ClipStore.shared
@@ -31,7 +29,8 @@ struct LibraryView: View {
     }
     var body: some View {
         HStack(spacing: 0) {
-            sidebar.frame(width: 220)
+            LibrarySidebar(store: store, filter: $filter, settings: $settings, selected: $selected, collections: collections)
+                .frame(width: 220)
             Rectangle().fill(.primary.opacity(0.08)).frame(width: 1)
             VStack(spacing: 0) {
                 topBar.zIndex(1)
@@ -79,40 +78,6 @@ struct LibraryView: View {
             return true
         }
     }
-    private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 10) { Image(nsImage: NSImage(named: NSImage.Name("AppIcon")) ?? NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: nil)!).resizable().frame(width: 24,height:24); VStack(alignment:.leading,spacing:2){ Text("ClipToMac").font(.system(size:14,weight:.semibold)); Text("LIBRARY").font(.system(size:9,weight:.semibold)).tracking(1.4).foregroundStyle(.secondary) } }.padding(.horizontal,17).padding(.vertical,18)
-            ScrollView { VStack(alignment:.leading,spacing:16) {
-                sidebarGroup("LIBRARY", rows: [("All Clips",.all,"square.grid.2x2"),("Pinned",.pinned,"pin"),("Sent",.sent,"arrow.up.right"),("Received",.received,"arrow.down.left")])
-                sidebarGroup("TYPE", rows: [("Text",.text,"text.alignleft"),("Images",.images,"photo"),("Files",.files,"doc")])
-                if !collections.isEmpty { VStack(alignment:.leading,spacing:5){ label("COLLECTIONS"); ForEach(collections,id:\.self){ row($0,.collection($0),"folder") } } }
-                let apps = Array(Set(store.clips.map(\.sourceApp))).filter { $0 != .generic }.sorted { $0.rawValue < $1.rawValue }
-                if !apps.isEmpty { VStack(alignment:.leading,spacing:5){ label("APPS"); ForEach(apps,id:\.self){ row($0.rawValue,.app($0),$0.iconSymbol) } } }
-            }.padding(.horizontal,10).padding(.vertical,8) }
-            Spacer(minLength:0)
-            Button { settings.toggle() } label: { Label("Settings & Storage",systemImage:"gearshape") }.buttonStyle(.plain).padding(14)
-        }.background(.black.opacity(0.12))
-    }
-    private func sidebarGroup(_ title:String, rows:[(String,LibraryFilter,String)]) -> some View { VStack(alignment:.leading,spacing:5){ label(title); ForEach(Array(rows.enumerated()),id:\.offset){ pair in let item=pair.element; row(item.0,item.1,item.2) } } }
-    private func label(_ text:String)->some View { Text(text).font(.system(size:9,weight:.semibold)).tracking(1.3).foregroundStyle(.secondary).padding(.horizontal,9).padding(.top,5) }
-    private func row(_ title: String, _ value: LibraryFilter, _ symbol: String) -> some View {
-        Button { filter = value; settings = false; selected = [] } label: {
-            HStack(spacing: 9) {
-                if case .app(let app) = value { SourceAppIcon(app: app, package: "").frame(width: 18, height: 18) }
-                else { Image(systemName: symbol).frame(width: 18) }
-                Text(title)
-                Spacer(minLength: 8)
-                let count = countFor(value)
-                if count > 0 { Text("\(count)").font(.system(size: 10)).foregroundStyle(.secondary) }
-            }
-            .frame(maxWidth: .infinity, minHeight: 20, alignment: .leading)
-            .padding(.horizontal, 9).padding(.vertical, 7)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(LibrarySidebarButtonStyle(selected: filter == value))
-        .accessibilityAddTraits(filter == value ? .isSelected : [])
-    }
-    private func countFor(_ f:LibraryFilter)->Int { switch f {case .all:return store.clips.count;case .pinned:return store.clips.filter(\.isPinned).count;case .sent:return store.clips.filter{$0.direction=="sent"}.count;case .received:return store.clips.filter{$0.direction != "sent"}.count;case .text:return store.clips.filter{$0.kind == .text}.count;case .images:return store.clips.filter{$0.kind == .image}.count;case .files:return store.clips.filter{$0.kind == .file}.count;case .collection(let n):return store.clips.filter{$0.collection==n}.count;case .app(let a):return store.clips.filter{$0.sourceApp==a}.count} }
     private var topBar: some View {
         HStack(spacing:12) {
             VStack(alignment:.leading,spacing:3){ Text(settings ? "Settings & Storage" : title).font(.system(size:22,weight:.semibold)); Text(settings ? "LOCAL LIBRARY" : "\(visible.count) items").font(.system(size:9,weight:.semibold)).tracking(1.2).foregroundStyle(.secondary) }
@@ -236,14 +201,4 @@ struct SourceAppIcon: View {
 private struct ReadableLibraryGlass: View {
     @Environment(\.colorScheme) private var colorScheme
     var body: some View { ZStack { if #available(macOS 26.0,*) { Color.clear.glassEffect(.regular,in:Rectangle()); Rectangle().fill(colorScheme == .dark ? Color.black.opacity(0.16):Color.white.opacity(0.16)) } else { VisualEffectView(material:.sidebar,blendingMode:.behindWindow) } } }
-}
-
-private struct LibrarySidebarButtonStyle: ButtonStyle {
-    let selected: Bool
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .foregroundStyle(selected ? Color.primary : Color.secondary)
-            .background(Color.primary.opacity(configuration.isPressed ? 0.16 : selected ? 0.10 : 0), in: RoundedRectangle(cornerRadius: 6))
-            .contentShape(Rectangle())
-    }
 }
