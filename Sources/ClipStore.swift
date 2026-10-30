@@ -117,6 +117,13 @@ public class ClipStore: ObservableObject {
     
     @Published public var deleteStoredFilesByDefault = false { didSet { preferences.set(deleteStoredFilesByDefault, forKey: "deleteStoredFiles") } }
     private let preferences: UserDefaults
+    private lazy var phoneNotificationPermissionController = PhoneNotificationPermissionController(
+        preferences: preferences,
+        relayIsEnabled: { [weak self] in self?.phoneNotificationRelayEnabled ?? false },
+        setRelayEnabled: { [weak self] enabled in self?.phoneNotificationRelayEnabled = enabled },
+        setPermissionMessage: { [weak self] message in self?.phoneNotificationPermissionMessage = message },
+        requestSettingsPrompt: { [weak self] in self?.phoneNotificationSettingsPromptRequested = true }
+    )
     private let attachmentDeletionScheduler: AttachmentDeletionScheduler
     private let storageURL: URL
     private let credentialStorage: TrustedDeviceStorage?
@@ -456,80 +463,19 @@ public class ClipStore: ObservableObject {
     }
     
     public func setPhoneNotificationRelayEnabled(_ enabled: Bool) {
-        guard enabled else {
-            phoneNotificationRelayEnabled = false
-            return
-        }
-
-        UNUserNotificationCenter.current().getNotificationSettings { [weak self] settings in
-            guard let self else { return }
-            if settings.authorizationStatus == .notDetermined {
-                UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { [weak self] granted, _ in
-                    guard let self else { return }
-                    UNUserNotificationCenter.current().getNotificationSettings { latest in
-                        Task { @MainActor in
-                            self.applyPhoneNotificationSettings(latest)
-                            let canAlert = granted && self.notificationAlertsAllowed(latest)
-                            if canAlert { self.preferences.set(1, forKey: "phoneNotificationRelayConsentVersion") }
-                            self.phoneNotificationRelayEnabled = canAlert
-                            if !canAlert { self.phoneNotificationSettingsPromptRequested = true }
-                        }
-                    }
-                }
-                return
-            }
-
-            Task { @MainActor in
-                self.applyPhoneNotificationSettings(settings)
-                let canAlert = self.notificationAlertsAllowed(settings)
-                if canAlert { self.preferences.set(1, forKey: "phoneNotificationRelayConsentVersion") }
-                self.phoneNotificationRelayEnabled = canAlert
-                if !canAlert || settings.soundSetting != .enabled {
-                    self.phoneNotificationSettingsPromptRequested = true
-                }
-            }
-        }
+        phoneNotificationPermissionController.setRelayEnabledByUser(enabled)
     }
 
     public func openPhoneNotificationSettings() {
-        let appSettings = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=com.vdx.cliptomac")
-        let notificationsSettings = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")
-        if let appSettings, NSWorkspace.shared.open(appSettings) { return }
-        if let notificationsSettings, NSWorkspace.shared.open(notificationsSettings) { return }
-        NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/System Settings.app"))
+        phoneNotificationPermissionController.openNotificationSettings()
     }
 
     public func openFocusSettings() {
-        let focusSettings = URL(string: "x-apple.systempreferences:com.apple.Focus-Settings.extension")
-        if let focusSettings, NSWorkspace.shared.open(focusSettings) { return }
-        NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/System Settings.app"))
+        phoneNotificationPermissionController.openFocusSettings()
     }
 
     public func refreshPhoneNotificationPermission() {
-        UNUserNotificationCenter.current().getNotificationSettings { [weak self] settings in
-            Task { @MainActor in
-                guard let self else { return }
-                self.applyPhoneNotificationSettings(settings)
-                if !self.notificationAlertsAllowed(settings), self.phoneNotificationRelayEnabled {
-                    self.phoneNotificationRelayEnabled = false
-                }
-            }
-        }
-    }
-
-    private func notificationAlertsAllowed(_ settings: UNNotificationSettings) -> Bool {
-        (settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional)
-            && settings.alertSetting == .enabled
-    }
-
-    private func applyPhoneNotificationSettings(_ settings: UNNotificationSettings) {
-        if settings.authorizationStatus == .denied || !notificationAlertsAllowed(settings) {
-            phoneNotificationPermissionMessage = "macOS is blocking ClipToMac alerts. Allow notifications in System Settings to forward Android notifications here."
-        } else if settings.soundSetting == .disabled {
-            phoneNotificationPermissionMessage = "ClipToMac alerts are allowed, but macOS has disabled their sound. Enable sound in System Settings."
-        } else {
-            phoneNotificationPermissionMessage = nil
-        }
+        phoneNotificationPermissionController.refresh()
     }
     
     private func sendNotification(for item: ClipItem) {
