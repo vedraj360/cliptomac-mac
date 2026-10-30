@@ -117,6 +117,7 @@ public class ClipStore: ObservableObject {
     
     @Published public var deleteStoredFilesByDefault = false { didSet { preferences.set(deleteStoredFilesByDefault, forKey: "deleteStoredFiles") } }
     private let preferences: UserDefaults
+    private let attachmentDeletionScheduler: AttachmentDeletionScheduler
     private let storageURL: URL
     private let credentialStorage: TrustedDeviceStorage?
     private let trustedDevicesURL: URL
@@ -126,6 +127,7 @@ public class ClipStore: ObservableObject {
     
     public init(storageDirectory: URL? = nil, preferences: UserDefaults = .standard, systemIntegration: Bool = true) {
         self.preferences = preferences
+        self.attachmentDeletionScheduler = AttachmentDeletionScheduler(preferences: preferences)
         self.deleteStoredFilesByDefault = preferences.bool(forKey: "deleteStoredFiles")
         self.autoCopy = preferences.object(forKey: "autoCopy") as? Bool ?? true
         self.showNotifications = preferences.object(forKey: "showNotifications") as? Bool ?? true
@@ -368,16 +370,8 @@ public class ClipStore: ObservableObject {
     public func removeClips(ids: Set<UUID>, deleteFiles: Bool? = nil) {
         let removed = clips.filter { ids.contains($0.id) }; guard !removed.isEmpty else { return }
         let previous = clips
-        var pending = preferences.dictionary(forKey: "pendingAttachmentDeletions") as? [String: Double] ?? [:]
         if deleteFiles ?? deleteStoredFilesByDefault {
-            let root = attachmentDirectory.resolvingSymlinksInPath().standardizedFileURL.path + "/"
-            for clip in removed {
-                if let path = clip.attachmentPath {
-                    let canonical = URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path
-                    if canonical.hasPrefix(root) { pending[canonical] = Date().timeIntervalSince1970 + 10 }
-                }
-            }
-            preferences.set(pending, forKey: "pendingAttachmentDeletions")
+            attachmentDeletionScheduler.schedule(for: removed, attachmentDirectory: attachmentDirectory)
         }
         clips.removeAll { ids.contains($0.id) }
         guard saveClips() else { clips = previous; return }
@@ -389,26 +383,14 @@ public class ClipStore: ObservableObject {
     }
     public func undoDelete() {
         guard undoAvailable else { return }
-        var pending = preferences.dictionary(forKey: "pendingAttachmentDeletions") as? [String: Double] ?? [:]
-        for clip in deletedClips {
-            if let path = clip.attachmentPath { pending.removeValue(forKey: URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path) }
-        }
-        preferences.set(pending, forKey: "pendingAttachmentDeletions")
+        attachmentDeletionScheduler.cancel(for: deletedClips)
         clips = (deletedClips + clips).sorted { $0.timestamp > $1.timestamp }; deletedClips = []; undoAvailable = false; undoGeneration = UUID(); saveClips()
     }
     private func sweepAttachmentDeletions() {
-        var pending = preferences.dictionary(forKey: "pendingAttachmentDeletions") as? [String: Double] ?? [:]
         let references = Set(clips.compactMap { $0.attachmentPath }.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().standardizedFileURL.path })
-        let root = attachmentDirectory.resolvingSymlinksInPath().standardizedFileURL.path + "/"
-        for (path, deadline) in pending where deadline <= Date().timeIntervalSince1970 {
-            let canonical = URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path
-            if canonical.hasPrefix(root), !references.contains(canonical), FileManager.default.fileExists(atPath: canonical) {
-                do { try FileManager.default.removeItem(atPath: canonical) } catch { continue }
-            }
-            pending.removeValue(forKey: path)
+        if attachmentDeletionScheduler.sweepExpired(referencedFiles: references, attachmentDirectory: attachmentDirectory) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 10) { self.sweepAttachmentDeletions() }
         }
-        preferences.set(pending, forKey: "pendingAttachmentDeletions")
-        if !pending.isEmpty { DispatchQueue.main.asyncAfter(deadline: .now() + 10) { self.sweepAttachmentDeletions() } }
     }
     public func togglePinned(ids: Set<UUID>) { for i in clips.indices where ids.contains(clips[i].id) { clips[i].isPinned.toggle(); clips[i].updatedAt = Date() }; saveClips() }
     public func setCollection(_ name: String?, ids: Set<UUID>) { for i in clips.indices where ids.contains(clips[i].id) { clips[i].collection = name; clips[i].updatedAt = Date() }; saveClips() }
