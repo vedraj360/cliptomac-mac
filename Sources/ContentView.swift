@@ -1,5 +1,28 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
+
+private enum ClipboardSendPayload {
+    case text(String)
+    case image(Data)
+    case files([URL])
+
+    var title: String {
+        switch self {
+        case .text: return "Clipboard text"
+        case .image: return "Clipboard image"
+        case .files(let urls): return urls.count == 1 ? urls[0].lastPathComponent : "\(urls.count) files from clipboard"
+        }
+    }
+
+    var preview: String {
+        switch self {
+        case .text(let value): return String(value.trimmingCharacters(in: .whitespacesAndNewlines).prefix(180))
+        case .image: return "The image currently copied on your Mac will be sent as a PNG."
+        case .files(let urls): return urls.prefix(4).map(\.lastPathComponent).joined(separator: "\n") + (urls.count > 4 ? "\n… and \(urls.count - 4) more" : "")
+        }
+    }
+}
 
 public struct ContentView: View {
     @ObservedObject private var store = ClipStore.shared
@@ -13,6 +36,19 @@ public struct ContentView: View {
     @State private var deleteClearFiles = false
     @State private var unpairTarget: PairedDevice?
     @State private var menuApp: KnownApp?
+    @State private var selectedSendDeviceID: String?
+    @State private var clipboardReview: ClipboardSendPayload?
+    @State private var sendNotice: String?
+    @State private var sendingClipboard = false
+    @State private var showPhoneNotificationSettingsPrompt = false
+
+    private var sendDevices: [PairedDevice] {
+        store.pairedDevices.filter { $0.securePairing == true && !$0.token.isEmpty }
+    }
+
+    private var sendDevice: PairedDevice? {
+        sendDevices.first(where: { $0.id == selectedSendDeviceID }) ?? sendDevices.first
+    }
 
     private var filtered: [ClipItem] {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -27,7 +63,12 @@ public struct ContentView: View {
             header.zIndex(1)
             Rectangle().fill(.primary.opacity(0.08)).frame(height: 1)
             TransferPanel(compact: true)
-            if settings { preferences } else { feed }
+            if settings { preferences } else {
+                VStack(spacing: 0) {
+                    sendActions
+                    feed
+                }
+            }
             footer.zIndex(1)
         }
         .font(.system(size: 13, design: .default))
@@ -50,7 +91,38 @@ public struct ContentView: View {
                     store.unpairDevice(id: device.id)
                     unpairTarget = nil
                 } cancel: { unpairTarget = nil }
+            } else if let payload = clipboardReview {
+                clipboardConfirmation(payload)
+            } else if showPhoneNotificationSettingsPrompt {
+                confirmationPanel(
+                    title: "Allow Mac notifications",
+                    message: store.phoneNotificationPermissionMessage ?? "Allow ClipToMac alerts and sound in System Settings to hear forwarded Android notifications.",
+                    action: "Open Notification Settings",
+                    destructive: false
+                ) {
+                    showPhoneNotificationSettingsPrompt = false
+                    store.openPhoneNotificationSettings()
+                } cancel: {
+                    showPhoneNotificationSettingsPrompt = false
+                }
             }
+        }
+        .onAppear {
+            selectedSendDeviceID = sendDevices.first?.id
+            store.refreshPhoneNotificationPermission()
+        }
+        .onChange(of: store.pairedDevices) { devices in
+            let eligible = devices.first(where: { $0.id == selectedSendDeviceID && $0.securePairing == true && !$0.token.isEmpty })
+            selectedSendDeviceID = eligible?.id ?? devices.first(where: { $0.securePairing == true && !$0.token.isEmpty })?.id
+        }
+        .onChange(of: store.phoneNotificationSettingsPromptRequested) { requested in
+            if requested {
+                showPhoneNotificationSettingsPrompt = true
+                store.phoneNotificationSettingsPromptRequested = false
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            store.refreshPhoneNotificationPermission()
         }
     }
 
@@ -211,6 +283,165 @@ public struct ContentView: View {
         }
     }
 
+    private var sendActions: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 8) {
+                Text("SEND TO PHONE").font(.system(size: 9, weight: .semibold)).tracking(1.4).foregroundStyle(.secondary)
+                Spacer()
+                if sendDevices.count > 1 {
+                    Menu {
+                        ForEach(sendDevices) { device in
+                            Button { selectedSendDeviceID = device.id } label: {
+                                if device.id == sendDevice?.id { Label(device.name, systemImage: "checkmark") }
+                                else { Text(device.name) }
+                            }
+                        }
+                    } label: {
+                        Label(sendDevice?.name ?? "Choose phone", systemImage: "iphone")
+                            .font(.system(size: 10, weight: .medium))
+                            .lineLimit(1)
+                    }
+                    .menuStyle(.borderlessButton)
+                } else if let device = sendDevice {
+                    Label(device.name, systemImage: "iphone").font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary).lineLimit(1)
+                } else {
+                    Text("Pair a phone to send").font(.system(size: 10)).foregroundStyle(.secondary)
+                }
+            }
+            HStack(spacing: 8) {
+                Button(action: prepareClipboardReview) {
+                    Label(sendingClipboard ? "Preparing…" : "Send clipboard", systemImage: "doc.on.clipboard")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .disabled(sendDevice == nil || sendingClipboard)
+                .help("Review and send the current Mac clipboard")
+
+                Button(action: chooseAttachment) {
+                    Label("Attach file", systemImage: "paperclip")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .disabled(sendDevice == nil)
+                .help("Choose a file to send to the paired phone")
+            }
+            if let sendNotice {
+                Text(sendNotice).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(2)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 12)
+        .padding(.bottom, 4)
+    }
+
+    private func clipboardConfirmation(_ payload: ClipboardSendPayload) -> some View {
+        ZStack {
+            Color.black.opacity(0.30).onTapGesture { clipboardReview = nil }
+            VStack(alignment: .leading, spacing: 13) {
+                Text("SEND CLIPBOARD").font(.system(size: 9, weight: .semibold)).tracking(1.5).foregroundStyle(.secondary)
+                Text(payload.title).font(.system(size: 16, weight: .semibold)).lineLimit(2)
+                Text(payload.preview.isEmpty ? "The clipboard is empty." : payload.preview)
+                    .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(5).textSelection(.enabled)
+                HStack {
+                    Button("Cancel") { clipboardReview = nil }.keyboardShortcut(.cancelAction)
+                    Spacer()
+                    Button("Send") { sendClipboard(payload) }
+                        .buttonStyle(GraphiteButtonStyle())
+                        .disabled(sendDevice == nil || sendingClipboard)
+                        .keyboardShortcut(.defaultAction)
+                }
+            }
+            .padding(20)
+            .frame(width: 330, alignment: .leading)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 9))
+            .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(.white.opacity(0.18)))
+            .shadow(color: .black.opacity(0.24), radius: 20, y: 8)
+        }
+    }
+
+    private func prepareClipboardReview() {
+        let pasteboard = NSPasteboard.general
+        if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
+            clipboardReview = .files(urls)
+            return
+        }
+        if let image = NSImage(pasteboard: pasteboard), image.isValid,
+           let tiff = image.tiffRepresentation,
+           let bitmap = NSBitmapImageRep(data: tiff),
+           let png = bitmap.representation(using: .png, properties: [:]) {
+            clipboardReview = .image(png)
+            return
+        }
+        if let text = pasteboard.string(forType: .string), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            clipboardReview = .text(text)
+            return
+        }
+        sendNotice = "The clipboard has no sendable text, image, or file."
+    }
+
+    private func chooseAttachment() {
+        guard let device = sendDevice else { return }
+        let panel = NSOpenPanel()
+        panel.title = "Choose a file to send to \(device.name)"
+        panel.prompt = "Send File"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.item]
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            Task { @MainActor in
+                do { try await queueFile(url, to: device) }
+                catch { sendNotice = error.localizedDescription }
+            }
+        }
+    }
+
+    private func sendClipboard(_ payload: ClipboardSendPayload) {
+        guard let device = sendDevice else { return }
+        clipboardReview = nil
+        sendingClipboard = true
+        sendNotice = "Preparing clipboard…"
+        Task { @MainActor in
+            do {
+                switch payload {
+                case .text(let text):
+                    _ = try MacTransferService.shared.sendText(text, to: device)
+                    sendNotice = "Clipboard queued for \(device.name)."
+                case .image(let data):
+                    let source = ClipStore.shared.attachmentDirectory.appendingPathComponent("clipboard-\(UUID().uuidString).png")
+                    try FileManager.default.createDirectory(at: source.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try data.write(to: source, options: .atomic)
+                    defer { try? FileManager.default.removeItem(at: source) }
+                    _ = try await MacTransferService.shared.sendFile(source, to: device)
+                    sendNotice = "Clipboard image queued for \(device.name)."
+                case .files(let urls):
+                    var queued = 0
+                    for url in urls {
+                        sendNotice = "Preparing \(url.lastPathComponent)…"
+                        try await queueFile(url, to: device, updateNotice: false)
+                        queued += 1
+                    }
+                    sendNotice = "\(queued) \(queued == 1 ? "file" : "files") queued for \(device.name)."
+                }
+            } catch {
+                sendNotice = error.localizedDescription
+            }
+            sendingClipboard = false
+        }
+    }
+
+    @MainActor
+    private func queueFile(_ url: URL, to device: PairedDevice, updateNotice: Bool = true) async throws {
+        let hasAccess = url.startAccessingSecurityScopedResource()
+        defer { if hasAccess { url.stopAccessingSecurityScopedResource() } }
+        if updateNotice { sendNotice = "Preparing \(url.lastPathComponent)…" }
+        _ = try await MacTransferService.shared.sendFile(url, to: device)
+        if updateNotice { sendNotice = "File queued for \(device.name)." }
+    }
+
     private func card(_ clip: ClipItem) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 7) {
@@ -283,6 +514,44 @@ public struct ContentView: View {
                     Divider().opacity(0.3)
                     preference("Delete stored files", subtitle: "Default choice when deleting attachment history", value: $store.deleteStoredFilesByDefault)
                     preference("Receive sound", subtitle: "A quiet cue for new clips", value: $store.playSound)
+                }
+                section("PHONE NOTIFICATIONS") {
+                    preference("Forward Android notifications", subtitle: "Show alerts from apps selected on your phone", value: Binding(
+                        get: { store.phoneNotificationRelayEnabled },
+                        set: { store.setPhoneNotificationRelayEnabled($0) }
+                    ))
+                    if let permissionMessage = store.phoneNotificationPermissionMessage {
+                        HStack(alignment: .top, spacing: 8) {
+                            Text(permissionMessage).font(.system(size: 10)).foregroundStyle(.secondary)
+                            Spacer(minLength: 4)
+                            Button("Open Settings") { store.openPhoneNotificationSettings() }
+                                .buttonStyle(.plain).font(.system(size: 10, weight: .medium))
+                        }
+                    }
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: "moon.zzz.fill")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 30, height: 30)
+                                .background(.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Show alerts during Focus")
+                                    .font(.system(size: 11, weight: .medium))
+                                Text("Allow ClipToMac in each Focus where you want forwarded alerts.")
+                                    .font(.system(size: 10)).foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        Button { store.openFocusSettings() } label: {
+                            Label("Manage Focus Settings", systemImage: "slider.horizontal.3")
+                                .font(.system(size: 10, weight: .medium))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .buttonStyle(GraphiteButtonStyle())
+                        Text("Forwarded alerts stay in Notification Center, not clip history.")
+                            .font(.system(size: 9)).foregroundStyle(.tertiary)
+                    }
                 }
                 section("PAIRED PHONES") {
                     if store.pairedDevices.isEmpty {

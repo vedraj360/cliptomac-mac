@@ -14,6 +14,7 @@ public final class HTTPServer {
     private let connectionSlots = DispatchSemaphore(value: 6)
     @MainActor private static let pairingPolicy = PairingRequestPolicy()
     @MainActor private var inboxWaiters = 0
+    @MainActor private var notificationReplyWaiters = 0
     private let maxBody = 25 * 1024 * 1024
 
     public func start(port: Int = 5678) {
@@ -120,7 +121,7 @@ public final class HTTPServer {
         if headers["transfer-encoding"] != nil { return nil } // chunked framing is intentionally unsupported
         let length = Int(headers["content-length"] ?? "0")
         let path = String(parts[1]).components(separatedBy: "?")[0]
-        let bodyLimit = path == "/pair/request" ? 4096 : (path.hasPrefix("/buckets/") ? TransferManifest.bucketBytes : maxBody)
+        let bodyLimit = path == "/pair/request" ? 4096 : (path == "/notifications/relay" ? 64 * 1024 : (path.hasPrefix("/buckets/") ? TransferManifest.bucketBytes : maxBody))
         guard let length, length >= 0, length <= bodyLimit else { return nil }
         let bodyStart = split.upperBound
         let live = parts[0] == "PUT" && headers["origin"] == nil && headers["sec-fetch-site"] == nil
@@ -170,6 +171,31 @@ public final class HTTPServer {
         }
         guard let authenticatedDevice = validDevice(token) else { respond(fd, 401, ["error": "Device not paired or invalid token"]); return }
         ClipStore.shared.markDeviceSeen(id: authenticatedDevice.id)
+        if req.method == "POST", req.path == "/notifications/relay" {
+            guard let payload = try? JSONDecoder().decode(PhoneNotificationPayload.self, from: req.body), payload.isValid else {
+                respond(fd, 400, ["error": "Invalid notification payload"]); return
+            }
+            switch PhoneNotificationRelay.shared.receive(payload, from: authenticatedDevice) {
+            case .delivered: respond(fd, 200, ["status": "delivered"])
+            case .ignored: respond(fd, 200, ["status": "ignored"])
+            case .rateLimited: respond(fd, 429, ["error": "Notification relay rate limit reached"])
+            }
+            return
+        }
+        if req.method == "GET", req.path == "/notifications/reply/wait" {
+            guard notificationReplyWaiters < 4 else { respond(fd, 429, ["error": "Too many notification reply waiters"]); return }
+            notificationReplyWaiters += 1
+            Task { @MainActor in
+                defer { notificationReplyWaiters -= 1 }
+                guard let command = await PhoneNotificationRelay.shared.waitForReply(deviceID: authenticatedDevice.id),
+                      let data = try? JSONEncoder().encode(command) else {
+                    self.respond(fd, 204, raw: Data(), contentType: "application/json; charset=utf-8")
+                    return
+                }
+                self.respond(fd, 200, raw: data, contentType: "application/json; charset=utf-8")
+            }
+            return
+        }
         if req.method == "POST", req.path == "/pair/identity", let device = validDevice(token) {
             guard let object = try? JSONSerialization.jsonObject(with: req.body) as? [String: Any], let id = object["deviceId"] as? String,
                   ClipStore.shared.migrateDeviceIdentity(token: token, id: id) else { respond(fd, 409, ["error": "Device identity could not be updated"]); return }

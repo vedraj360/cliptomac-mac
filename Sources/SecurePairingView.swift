@@ -6,9 +6,9 @@ struct SecurePairingView: View {
     @ObservedObject private var store = ClipStore.shared
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(store.connectionState() == .securePairingRequired ? "Secure pairing required" : (store.connectionState() == .unpaired ? "Pair your phone" : "Phone pairing")).font(.system(size: 15, weight: .semibold))
+            Text(store.connectionState() == .securePairingRequired ? "Secure pairing required" : (store.connectionState() == .unpaired ? "Pair your phone" : "Phone pairing")).font(.system(size: 14, weight: .semibold))
             Text(store.connectionExplanation)
-                .font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                .font(.system(size: 11)).foregroundStyle(.secondary).lineSpacing(1).fixedSize(horizontal: false, vertical: true)
             if let payload = pairing.payload {
                 PairingQRImage(payload: payload).equatable()
                 Label(String(format: "Expires in %d:%02d", pairing.remainingSeconds / 60, pairing.remainingSeconds % 60), systemImage: "timer")
@@ -22,10 +22,6 @@ struct SecurePairingView: View {
                 if pairing.expired {
                     Label("QR expired", systemImage: "clock.badge.exclamationmark").font(.system(size: 13, weight: .semibold)).foregroundStyle(.orange)
                     Text("Generate a new QR to continue pairing. The previous code no longer works.").font(.system(size: 12)).foregroundStyle(.secondary)
-                }
-                if store.connectionState() == .connected || store.connectionState() == .awaitingActivity {
-                    Text("Already paired. A QR is only needed to add another phone or pair again.")
-                        .font(.system(size: 11)).foregroundStyle(.secondary)
                 }
                 Button(pairing.expired ? "Generate new QR" : (store.connectionState() == .connected || store.connectionState() == .awaitingActivity ? "Add or re-pair a phone" : "Show pairing QR")) { store.updateLocalIP(); pairing.open(host: store.localIP, port: store.port) }.buttonStyle(GraphiteButtonStyle())
             }

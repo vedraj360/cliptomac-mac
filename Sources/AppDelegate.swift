@@ -1,11 +1,13 @@
 import Foundation
 import AppKit
 import SwiftUI
+import UserNotifications
 
 @MainActor
 public class AppDelegate: NSObject, NSApplicationDelegate {
     public static weak var shared: AppDelegate?
     public private(set) var libraryWindow: NSWindow?
+    private var phoneNotificationDetailWindow: NSWindow?
     private var statusItem: NSStatusItem!
     private var panel: GlassMenuPanel!
     private var outsideMonitor: Any?
@@ -13,6 +15,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         Self.shared = self
+        UNUserNotificationCenter.current().delegate = self
+        PhoneNotificationRelay.shared.registerNotificationActions()
         BucketTransferStorage.shared.pruneCommitted({ ClipStore.shared.seenTransferAttempt($0) }, isCancelled: { IncomingTransferControls.shared.isCancelled(scopedID: $0) })
         MacTransferService.shared.restoreIncomingTransfers()
         HTTPServer.shared.start(port: ClipStore.shared.port)
@@ -73,6 +77,31 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         libraryWindow?.makeKeyAndOrderFront(nil)
     }
 
+    public func showPhoneNotificationDetail(appName: String, title: String, body: String) {
+        panel?.orderOut(nil)
+        let content = TransparentHostingView(rootView: PhoneNotificationDetailView(appName: appName, title: title, bodyText: body))
+        if let window = phoneNotificationDetailWindow {
+            window.contentView = content
+        } else {
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 360),
+                styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+            window.title = "Notification"
+            window.minSize = NSSize(width: 420, height: 250)
+            window.isReleasedWhenClosed = false
+            window.isOpaque = false
+            window.backgroundColor = .clear
+            window.contentView = content
+            window.center()
+            phoneNotificationDetailWindow = window
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        phoneNotificationDetailWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    public func closePhoneNotificationDetail() {
+        phoneNotificationDetailWindow?.performClose(nil)
+    }
+
     @objc func togglePopover() {
         guard let button = statusItem.button, let anchorWindow = button.window else { return }
         if panel.isVisible { panel.orderOut(nil); return }
@@ -102,5 +131,43 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         if let localMonitor { NSEvent.removeMonitor(localMonitor) }
         HTTPServer.shared.stop()
         UDPDiscoveryServer.shared.stop()
+    }
+}
+
+extension AppDelegate: UNUserNotificationCenterDelegate {
+    nonisolated public func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
+        Task { @MainActor [weak self] in
+            guard let self else { completionHandler(); return }
+            self.handlePhoneNotificationResponse(response)
+            completionHandler()
+        }
+    }
+
+    @MainActor private func handlePhoneNotificationResponse(_ response: UNNotificationResponse) {
+        let info = response.notification.request.content.userInfo
+        let eventID = info["eventID"] as? String ?? ""
+        let deviceID = info["deviceID"] as? String ?? ""
+        switch response.actionIdentifier {
+        case PhoneNotificationRelay.viewActionID:
+            showPhoneNotificationDetail(
+                appName: info["appName"] as? String ?? "Android notification",
+                title: info["sourceTitle"] as? String ?? "",
+                body: info["fullBody"] as? String ?? response.notification.request.content.body
+            )
+        case PhoneNotificationRelay.replyActionID:
+            guard let reply = response as? UNTextInputNotificationResponse else { return }
+            let queued = PhoneNotificationRelay.shared.enqueueReply(deviceID: deviceID, eventID: eventID, text: reply.userText)
+            if !queued { NSLog("ClipToMac: Android notification reply could not be queued") }
+        case UNNotificationDefaultActionIdentifier:
+            if info["showFullText"] as? Bool == true {
+                showPhoneNotificationDetail(
+                    appName: info["appName"] as? String ?? "Android notification",
+                    title: info["sourceTitle"] as? String ?? "",
+                    body: info["fullBody"] as? String ?? response.notification.request.content.body
+                )
+            }
+        default:
+            break
+        }
     }
 }
