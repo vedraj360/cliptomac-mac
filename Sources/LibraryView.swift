@@ -35,7 +35,14 @@ struct LibraryView: View {
             VStack(spacing: 0) {
                 topBar.zIndex(1)
                 Rectangle().fill(.primary.opacity(0.08)).frame(height: 1)
-                Group { if settings { settingsPane } else { contentPane } }.clipped()
+                Group {
+                    if settings {
+                        LibrarySettingsView(store: store, onExportBackup: backupExport, onImportBackup: backupImport)
+                    } else {
+                        contentPane
+                    }
+                }
+                .clipped()
             }
         }
         .font(.system(size: 13))
@@ -140,17 +147,6 @@ struct LibraryView: View {
     private func sendClipboard(to device:PairedDevice){ guard let text=NSPasteboard.general.string(forType:.string),!text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else{notice="There is no text on the Mac clipboard.";return}; do{let id=try MacTransferService.shared.sendText(text,to:device);_ = store.recordOutbound(text:text,to:device,transferID:id);notice="Clipboard sent to \(device.name)."}catch{notice=error.localizedDescription} }
     private func send(_ item:ClipItem,to device:PairedDevice){ Task { @MainActor in do { if item.kind == .text { let id=try MacTransferService.shared.sendText(item.text,to:device); _=store.recordOutbound(text:item.text,to:device,transferID:id) } else if let p=item.attachmentPath { let id=try await MacTransferService.shared.sendFile(URL(fileURLWithPath:p),to:device); _=store.recordOutbound(text:"",fileURL:URL(fileURLWithPath:p),to:device,transferID:id) }; notice="Transfer queued for \(device.name)." } catch { notice=error.localizedDescription } } }
     private func exportSelection(){ let panel=NSSavePanel();panel.nameFieldStringValue="ClipToMac-export.json";panel.begin{ response in guard response == .OK, let url=panel.url else{return}; let items=store.clips.filter{selected.contains($0.id)}; do { try store.exportBackup(to:url,items:items) } catch {notice=error.localizedDescription} } }
-    private var settingsPane: some View {
-        ScrollView { VStack(alignment:.leading,spacing:20) {
-            settingsSection("STORAGE") { Text(store.storageDirectory.path).font(.system(size:11)).textSelection(.enabled); Text("Using \(ByteCountFormatter.string(fromByteCount:store.storageBytes,countStyle:.file))").font(.system(size:12)).foregroundStyle(.secondary); HStack{Button("Open Finder"){NSWorkspace.shared.open(store.storageDirectory)};Button("Choose attachment folder"){let p=NSOpenPanel();p.canChooseDirectories=true;p.canChooseFiles=false;p.begin{if $0 == .OK,let u=p.url {store.setAttachmentDirectory(u)}}}};Text("Attachments: \(store.attachmentDirectory.path)").font(.system(size:10)).foregroundStyle(.secondary).textSelection(.enabled) }
-            settingsSection("DELETION") {
-                Toggle("Delete stored attachments with history by default", isOn: $store.deleteStoredFilesByDefault)
-                Text("Only ClipToMac’s local copies are removed after Undo expires. Original files and the phone’s copies are kept.").font(.system(size: 11)).foregroundStyle(.secondary)
-            }
-            settingsSection("BACKUP") { HStack { Button("Export backup…"){backupExport()}; Button("Import backup…"){backupImport()} }; Text("Backups contain library entries and attachment files. Paired device credentials are never included.").font(.system(size:11)).foregroundStyle(.secondary) }
-            settingsSection("GLOBAL SHORTCUT") { HStack { Text("Show / hide library"); Spacer(); Picker("Modifiers",selection:$store.shortcutModifiers){Text("⌘⌥").tag(UInt32(0x900));Text("⌘⇧").tag(UInt32(0x300));Text("⌃⌥").tag(UInt32(0x1800))}.labelsHidden().frame(width:90); Picker("Shortcut key",selection:$store.shortcutKeyCode){Text("V").tag(UInt32(9));Text("L").tag(UInt32(37));Text("Space").tag(UInt32(49));Text("C").tag(UInt32(8))}.labelsHidden().frame(width:100) }; Text("Registered as a system hotkey; ClipToMac does not monitor keystrokes.").font(.system(size:11)).foregroundStyle(.secondary) }
-        }.padding(22) }
-    }
     private var collectionEditor: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Add to collection").font(.system(size: 20, weight: .semibold))
@@ -165,7 +161,6 @@ struct LibraryView: View {
         }.padding(24).frame(width: 410).background(.regularMaterial)
     }
     private var transferTray: some View { TransferPanel() }
-    private func settingsSection<Content:View>(_ title:String,@ViewBuilder content:()->Content)->some View { VStack(alignment:.leading,spacing:12){Text(title).font(.system(size:9,weight:.semibold)).tracking(1.4).foregroundStyle(.secondary);content()}.padding(15).frame(maxWidth:.infinity,alignment:.leading).background(.primary.opacity(0.035),in:RoundedRectangle(cornerRadius:8)) }
     private func backupExport(){let p=NSSavePanel();p.nameFieldStringValue="ClipToMac-backup.json";p.begin{if $0 == .OK,let u=p.url{do{try store.exportBackup(to:u)}catch{notice=error.localizedDescription}}}}
     private func backupImport(){let p=NSOpenPanel();p.canChooseFiles=true;p.allowedContentTypes=[.json];p.begin{if $0 == .OK,let u=p.url{do{try store.importBackup(from:u);notice="Backup imported."}catch{notice=error.localizedDescription}}}}
 }
