@@ -60,6 +60,17 @@ import AppKit
         let media = root.appendingPathComponent("source.bin"); let payload=Data([0,1,2,255]); try payload.write(to:media)
         precondition(store.addTransferredItem(id:"file-1",text:"",appName:"Files",packageName:"files",timestamp:Date(),kind:"file",attachmentName:"file.bin",attachmentPath:media.path,sourceDeviceId:"phone"))
         let backup=root.appendingPathComponent("backup.json"); try store.exportBackup(to:backup)
+        let failedImportRoot = root.appendingPathComponent("failed-import")
+        try FileManager.default.createDirectory(at: failedImportRoot.appendingPathComponent("history.json"), withIntermediateDirectories: true)
+        let failedImport = ClipStore(storageDirectory: failedImportRoot, preferences: prefs, systemIntegration: false)
+        do {
+            try failedImport.importBackup(from: backup)
+            preconditionFailure("Import into an unwritable library unexpectedly succeeded")
+        } catch { }
+        precondition(failedImport.clips.isEmpty, "Failed backup persistence changed the in-memory library")
+        let stagedFiles = (try? FileManager.default.contentsOfDirectory(at: failedImport.attachmentDirectory, includingPropertiesForKeys: nil)) ?? []
+        precondition(stagedFiles.isEmpty, "Failed backup persistence left staged attachment files behind")
+        print("PASS backup import rolls back staged files when library persistence fails")
         let restored=ClipStore(storageDirectory:root.appendingPathComponent("restored"),preferences:prefs,systemIntegration:false)
         try restored.importBackup(from:backup)
         precondition(restored.clips.count == 3)

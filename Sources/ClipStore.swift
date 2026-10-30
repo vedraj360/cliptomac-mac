@@ -4,12 +4,6 @@ import UserNotifications
 import Combine
 import CryptoKit
 
-private struct ClipBackup: Codable {
-    let formatVersion: Int
-    let clips: [ClipItem]
-    let attachments: [String: Data]
-}
-
 public struct PairedDevice: Identifiable, Codable, Equatable {
     public let id: String
     public let name: String
@@ -423,46 +417,21 @@ public class ClipStore: ObservableObject {
     public func togglePinned(ids: Set<UUID>) { for i in clips.indices where ids.contains(clips[i].id) { clips[i].isPinned.toggle(); clips[i].updatedAt = Date() }; saveClips() }
     public func setCollection(_ name: String?, ids: Set<UUID>) { for i in clips.indices where ids.contains(clips[i].id) { clips[i].collection = name; clips[i].updatedAt = Date() }; saveClips() }
     public func exportBackup(to url: URL, items selectedItems: [ClipItem]? = nil) throws {
-        let exportItems = selectedItems ?? clips
-        var attachments: [String: Data] = [:]; var totalBytes = 0
-        for clip in exportItems {
-            guard let path = clip.attachmentPath else { continue }
-            var isDirectory: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), !isDirectory.boolValue else { continue }
-            let bytes = try Data(contentsOf: URL(fileURLWithPath: path), options: .mappedIfSafe)
-            guard bytes.count <= 25_000_000 else { throw NSError(domain: "ClipToMac", code: 2, userInfo: [NSLocalizedDescriptionKey: "An attachment exceeds the 25 MB backup limit."]) }
-            totalBytes += bytes.count
-            guard totalBytes <= 100_000_000 else { throw NSError(domain: "ClipToMac", code: 3, userInfo: [NSLocalizedDescriptionKey: "Attachments exceed the 100 MB backup limit."]) }
-            attachments[clip.id.uuidString] = bytes
-        }
-        let data = try JSONEncoder().encode(ClipBackup(formatVersion: 1, clips: exportItems, attachments: attachments))
-        try data.write(to: url, options: .atomic)
+        try LibraryBackupArchive.export(selectedItems ?? clips, to: url)
     }
     public func importBackup(from url: URL) throws {
-        let data = try Data(contentsOf: url)
-        guard data.count <= 150_000_000 else { throw NSError(domain: "ClipToMac", code: 1, userInfo: [NSLocalizedDescriptionKey: "Backup exceeds the 150 MB import limit."]) }
-        let imported: [ClipItem]; let attachments: [String: Data]
-        if let backup = try? JSONDecoder().decode(ClipBackup.self, from: data), backup.formatVersion == 1 { imported = backup.clips; attachments = backup.attachments }
-        else { imported = try JSONDecoder().decode([ClipItem].self, from: data); attachments = [:] }
-        guard imported.count <= 100_000, imported.allSatisfy({ $0.text.utf8.count <= 1_000_000 && $0.transferID.utf8.count <= 512 }) else { throw NSError(domain: "ClipToMac", code: 1, userInfo: [NSLocalizedDescriptionKey: "Backup exceeds supported limits."]) }
-        let attachmentBytes = attachments.values.reduce(0) { $0 + $1.count }
-        guard attachmentBytes <= 100_000_000, attachments.values.allSatisfy({ $0.count <= 25_000_000 }) else { throw NSError(domain: "ClipToMac", code: 1, userInfo: [NSLocalizedDescriptionKey: "Backup attachments exceed supported limits."]) }
-        var valid: [ClipItem] = []
-        var known = Set(clips.map(\.id))
-        for var item in imported {
-            guard known.insert(item.id).inserted else { continue }
-            if let bytes = attachments[item.id.uuidString] {
-                try FileManager.default.createDirectory(at: attachmentDirectory, withIntermediateDirectories: true)
-                let safeName = URL(fileURLWithPath: item.attachmentName ?? "attachment").lastPathComponent
-                let target = attachmentDirectory.appendingPathComponent(UUID().uuidString + "-" + safeName)
-                try bytes.write(to: target, options: .atomic); item.attachmentPath = target.path
-            } else {
-                item.attachmentPath = nil
-            }
-            valid.append(item)
+        let prepared = try LibraryBackupArchive.prepareImport(
+            from: url,
+            existingIDs: Set(clips.map(\.id)),
+            attachmentDirectory: attachmentDirectory
+        )
+        let previous = clips
+        clips = (prepared.clips + clips).sorted { $0.timestamp > $1.timestamp }
+        guard saveClips() else {
+            clips = previous
+            LibraryBackupArchive.discard(prepared)
+            throw NSError(domain: "ClipToMac", code: 4, userInfo: [NSLocalizedDescriptionKey: "Could not save imported clips to the library."])
         }
-        clips = (valid + clips).sorted { $0.timestamp > $1.timestamp }
-        saveClips()
     }
     public func recordOutbound(text: String, fileURL: URL? = nil, to device: PairedDevice, transferID: String, kind: ClipKind? = nil, mimeType: String? = nil, contentHash: String? = nil, attachmentName: String? = nil) -> Bool {
         guard !transferID.isEmpty else { return false }
