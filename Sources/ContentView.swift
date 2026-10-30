@@ -1,6 +1,5 @@
 import SwiftUI
 import AppKit
-import UniformTypeIdentifiers
 
 public struct ContentView: View {
     @ObservedObject private var store = ClipStore.shared
@@ -13,9 +12,7 @@ public struct ContentView: View {
     @State private var unpairTarget: PairedDevice?
     @State private var menuApp: KnownApp?
     @State private var selectedSendDeviceID: String?
-    @State private var clipboardReview: ClipboardSendPayload?
-    @State private var sendNotice: String?
-    @State private var sendingClipboard = false
+    @StateObject private var clipboardSender = ClipboardSendController()
     @State private var showPhoneNotificationSettingsPrompt = false
 
     private var sendDevices: [PairedDevice] {
@@ -61,12 +58,12 @@ public struct ContentView: View {
                     store.unpairDevice(id: device.id)
                     unpairTarget = nil
                 } cancel: { unpairTarget = nil }
-            } else if let payload = clipboardReview {
+            } else if let payload = clipboardSender.review {
                 ClipboardSendConfirmationView(
                     payload: payload,
-                    canSend: sendDevice != nil && !sendingClipboard,
-                    onCancel: { clipboardReview = nil },
-                    onSend: { sendClipboard(payload) }
+                    canSend: sendDevice != nil && !clipboardSender.isSending,
+                    onCancel: { clipboardSender.dismissReview() },
+                    onSend: { if let sendDevice { clipboardSender.send(payload, to: sendDevice) } }
                 )
             } else if showPhoneNotificationSettingsPrompt {
                 confirmationPanel(
@@ -193,91 +190,11 @@ public struct ContentView: View {
         SendToPhoneSection(
             devices: sendDevices,
             selectedDeviceID: $selectedSendDeviceID,
-            isPreparingClipboard: sendingClipboard,
-            notice: sendNotice,
-            onSendClipboard: prepareClipboardReview,
-            onAttachFile: chooseAttachment(for:)
+            isPreparingClipboard: clipboardSender.isSending,
+            notice: clipboardSender.notice,
+            onSendClipboard: clipboardSender.prepareReview,
+            onAttachFile: clipboardSender.chooseAttachment(for:)
         )
-    }
-
-    private func prepareClipboardReview() {
-        let pasteboard = NSPasteboard.general
-        if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
-            clipboardReview = .files(urls)
-            return
-        }
-        if let image = NSImage(pasteboard: pasteboard), image.isValid,
-           let tiff = image.tiffRepresentation,
-           let bitmap = NSBitmapImageRep(data: tiff),
-           let png = bitmap.representation(using: .png, properties: [:]) {
-            clipboardReview = .image(png)
-            return
-        }
-        if let text = pasteboard.string(forType: .string), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            clipboardReview = .text(text)
-            return
-        }
-        sendNotice = "The clipboard has no sendable text, image, or file."
-    }
-
-    private func chooseAttachment(for device: PairedDevice) {
-        let panel = NSOpenPanel()
-        panel.title = "Choose a file to send to \(device.name)"
-        panel.prompt = "Send File"
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = [.item]
-        panel.begin { response in
-            guard response == .OK, let url = panel.url else { return }
-            Task { @MainActor in
-                do { try await queueFile(url, to: device) }
-                catch { sendNotice = error.localizedDescription }
-            }
-        }
-    }
-
-    private func sendClipboard(_ payload: ClipboardSendPayload) {
-        guard let device = sendDevice else { return }
-        clipboardReview = nil
-        sendingClipboard = true
-        sendNotice = "Preparing clipboard…"
-        Task { @MainActor in
-            do {
-                switch payload {
-                case .text(let text):
-                    _ = try MacTransferService.shared.sendText(text, to: device)
-                    sendNotice = "Clipboard queued for \(device.name)."
-                case .image(let data):
-                    let source = ClipStore.shared.attachmentDirectory.appendingPathComponent("clipboard-\(UUID().uuidString).png")
-                    try FileManager.default.createDirectory(at: source.deletingLastPathComponent(), withIntermediateDirectories: true)
-                    try data.write(to: source, options: .atomic)
-                    defer { try? FileManager.default.removeItem(at: source) }
-                    _ = try await MacTransferService.shared.sendFile(source, to: device)
-                    sendNotice = "Clipboard image queued for \(device.name)."
-                case .files(let urls):
-                    var queued = 0
-                    for url in urls {
-                        sendNotice = "Preparing \(url.lastPathComponent)…"
-                        try await queueFile(url, to: device, updateNotice: false)
-                        queued += 1
-                    }
-                    sendNotice = "\(queued) \(queued == 1 ? "file" : "files") queued for \(device.name)."
-                }
-            } catch {
-                sendNotice = error.localizedDescription
-            }
-            sendingClipboard = false
-        }
-    }
-
-    @MainActor
-    private func queueFile(_ url: URL, to device: PairedDevice, updateNotice: Bool = true) async throws {
-        let hasAccess = url.startAccessingSecurityScopedResource()
-        defer { if hasAccess { url.stopAccessingSecurityScopedResource() } }
-        if updateNotice { sendNotice = "Preparing \(url.lastPathComponent)…" }
-        _ = try await MacTransferService.shared.sendFile(url, to: device)
-        if updateNotice { sendNotice = "File queued for \(device.name)." }
     }
 
     private var footer: some View {
