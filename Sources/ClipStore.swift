@@ -20,10 +20,6 @@ public struct PairedDevice: Identifiable, Codable, Equatable {
     }
 }
 
-public enum DeviceConnectionState: Equatable {
-    case unpaired, securePairingRequired, awaitingActivity, connected
-}
-
 @MainActor
 public class ClipStore: ObservableObject {
     public static let shared = ClipStore()
@@ -62,31 +58,13 @@ public class ClipStore: ObservableObject {
         guard pairedDevices.contains(where: { $0.id == id && $0.securePairing == true }) else { return }
         deviceLastSeen[id] = date
     }
-    public func connectionState(at now: Date = Date()) -> DeviceConnectionState {
-        guard !pairedDevices.isEmpty else { return .unpaired }
-        let secure = pairedDevices.filter { $0.securePairing == true }
-        guard !secure.isEmpty else { return .securePairingRequired }
-        return secure.contains { device in deviceLastSeen[device.id].map { now.timeIntervalSince($0) >= 0 && now.timeIntervalSince($0) < 60 } ?? false } ? .connected : .awaitingActivity
-    }
+    private var devicePresence: DevicePresencePresentation { DevicePresencePresentation(devices: pairedDevices, lastSeen: deviceLastSeen) }
+    public func connectionState(at now: Date = Date()) -> DeviceConnectionState { devicePresence.state(at: now) }
     public var connectionSummary: String {
-        switch connectionState() {
-        case .unpaired: return "Not paired"
-        case .securePairingRequired: return "Secure pairing required"
-        case .awaitingActivity:
-            let secure = pairedDevices.filter { $0.securePairing == true }
-            return secure.count == 1 ? "Paired · " + secure[0].name : "Paired · \(secure.count) phones"
-        case .connected:
-            let active = pairedDevices.filter { $0.securePairing == true && (deviceLastSeen[$0.id].map { Date().timeIntervalSince($0) >= 0 && Date().timeIntervalSince($0) < 60 } ?? false) }
-            return active.count == 1 ? "Connected · " + active[0].name : "Connected · \(active.count) phones"
-        }
+        devicePresence.summary()
     }
     public var connectionExplanation: String {
-        switch connectionState() {
-        case .unpaired: return "No phone is paired. Scan a pairing QR from the Android app."
-        case .securePairingRequired: return "Your saved phone uses the older pairing. Scan a fresh QR once to enable encrypted transfers."
-        case .awaitingActivity: return "Paired · waiting for phone activity."
-        case .connected: return "Recent authenticated phone activity over the encrypted connection."
-        }
+        devicePresence.explanation()
     }
     @Published public var undoAvailable = false
     @Published public var attachmentDirectory: URL
