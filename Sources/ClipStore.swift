@@ -121,6 +121,7 @@ public class ClipStore: ObservableObject {
     private let credentialStorage: TrustedDeviceStorage?
     private let trustedDevicesURL: URL
     private let seenTransferIDsURL: URL
+    private let historyFiles: ClipHistoryFileStore
     private var seenTransferIDs = Set<String>()
     
     public init(storageDirectory: URL? = nil, preferences: UserDefaults = .standard, systemIntegration: Bool = true) {
@@ -145,9 +146,10 @@ public class ClipStore: ObservableObject {
         self.trustedDevicesURL = dir.appendingPathComponent("trusted_devices.json")
         self.credentialStorage = systemIntegration ? TrustedDeviceStorage(url: self.trustedDevicesURL) : nil
         self.seenTransferIDsURL = dir.appendingPathComponent("seen_transfer_ids.json")
-        if let data = try? Data(contentsOf: seenTransferIDsURL), let ids = try? JSONDecoder().decode([String].self, from: data) { seenTransferIDs = Set(ids) }
         let savedAttachment = preferences.string(forKey: "attachmentDirectory")
         self.attachmentDirectory = savedAttachment.map { URL(fileURLWithPath: $0) } ?? dir.appendingPathComponent("attachments", isDirectory: true)
+        self.historyFiles = ClipHistoryFileStore(historyURL: self.storageURL, seenTransferIDsURL: self.seenTransferIDsURL)
+        self.seenTransferIDs = historyFiles.loadSeenTransferIDs()
         let savedKey = preferences.integer(forKey: "shortcutKeyCode")
         let savedModifiers = preferences.integer(forKey: "shortcutModifiers")
         self.shortcutKeyCode = UInt32(savedKey == 0 ? 9 : savedKey)
@@ -341,10 +343,8 @@ public class ClipStore: ObservableObject {
         seenTransferIDs.contains(id)
     }
     private func persistSeenTransferAttempt(_ id: String) -> Bool {
-        guard !id.isEmpty else { return false }; if seenTransferIDs.contains(id) { return true }; seenTransferIDs.insert(id)
-        if seenTransferIDs.count > 100_000 { seenTransferIDs = Set(seenTransferIDs.sorted().suffix(80_000)) }
-        guard let data = try? JSONEncoder().encode(Array(seenTransferIDs)) else { seenTransferIDs.remove(id); return false }
-        do { try PrivateAppStorage.write(data, to: seenTransferIDsURL) } catch { seenTransferIDs.remove(id); return false }
+        guard let updated = historyFiles.recordSeenTransferAttempt(id, current: seenTransferIDs) else { return false }
+        seenTransferIDs = updated
         return true
     }
     private func contentDigest(kind: ClipKind, text: String, path: String?, name: String?) -> String {
@@ -360,11 +360,7 @@ public class ClipStore: ObservableObject {
     }
     public var storageDirectory: URL { storageURL.deletingLastPathComponent() }
     public var storageBytes: Int64 {
-        let historyBytes = Int64((try? storageURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
-        guard let e = FileManager.default.enumerator(at: attachmentDirectory, includingPropertiesForKeys: [.fileSizeKey]) else { return historyBytes }
-        var attachmentsBytes: Int64 = 0
-        for case let file as URL in e { attachmentsBytes += Int64((try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }
-        return historyBytes + attachmentsBytes
+        historyFiles.storageBytes(attachmentDirectory: attachmentDirectory)
     }
     public func setAttachmentDirectory(_ url: URL) { attachmentDirectory = url; preferences.set(url.path, forKey: "attachmentDirectory"); try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true) }
     private var deletedClips: [ClipItem] = []
@@ -466,46 +462,15 @@ public class ClipStore: ObservableObject {
     }
     
     @discardableResult private func saveClips() -> Bool {
-        do {
-            let data = try JSONEncoder().encode(clips)
-            try PrivateAppStorage.write(data, to: storageURL)
-            return true
-        } catch {
-            print("Failed to save clips: \(error)")
-            return false
-        }
+        historyFiles.saveClips(clips)
     }
     
     private func repairAttachmentExtensions() {
-        let root = attachmentDirectory.resolvingSymlinksInPath().standardizedFileURL.path + "/"
-        let original = clips
-        var moves: [(URL, URL)] = []
-        for index in clips.indices where clips[index].direction == "received" {
-            guard let path = clips[index].attachmentPath else { continue }
-            let source = URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL
-            guard source.path.hasPrefix(root), source.pathExtension.isEmpty,
-                  FileManager.default.fileExists(atPath: source.path),
-                  let ext = AttachmentFilename.fileExtension(name: clips[index].attachmentName ?? "", mimeType: clips[index].mimeType) else { continue }
-            let target = source.appendingPathExtension(ext)
-            guard !FileManager.default.fileExists(atPath: target.path) else { continue }
-            do {
-                try FileManager.default.moveItem(at: source, to: target)
-                moves.append((source, target))
-                for reference in clips.indices where clips[reference].attachmentPath == path { clips[reference].attachmentPath = target.path }
-            } catch { print("Attachment filename repair deferred") }
-        }
-        if !moves.isEmpty && !saveClips() {
-            clips = original
-            for (source, target) in moves.reversed() { try? FileManager.default.moveItem(at: target, to: source) }
-        }
+        clips = historyFiles.repairAttachmentExtensions(in: clips, attachmentDirectory: attachmentDirectory)
     }
 
     private func loadClips() {
-        guard let data = try? Data(contentsOf: storageURL),
-              let loaded = try? JSONDecoder().decode([ClipItem].self, from: data) else {
-            return
-        }
-        self.clips = loaded
+        clips = historyFiles.loadClips()
     }
     
     public func setPhoneNotificationRelayEnabled(_ enabled: Bool) {
