@@ -1,12 +1,6 @@
 import SwiftUI
 import AppKit
 
-enum LibraryFilter: Hashable {
-    case all, pinned, sent, received, text, images, files
-    case collection(String)
-    case app(KnownApp)
-}
-
 struct LibrarySidebar: View {
     @ObservedObject var store: ClipStore
     @Binding var filter: LibraryFilter
@@ -116,17 +110,7 @@ struct LibrarySidebar: View {
     }
 
     private func countFor(_ filter: LibraryFilter) -> Int {
-        switch filter {
-        case .all: return store.clips.count
-        case .pinned: return store.clips.filter(\.isPinned).count
-        case .sent: return store.clips.filter { $0.direction == "sent" }.count
-        case .received: return store.clips.filter { $0.direction != "sent" }.count
-        case .text: return store.clips.filter { $0.kind == .text }.count
-        case .images: return store.clips.filter { $0.kind == .image }.count
-        case .files: return store.clips.filter { $0.kind == .file }.count
-        case .collection(let name): return store.clips.filter { $0.collection == name }.count
-        case .app(let app): return store.clips.filter { $0.sourceApp == app }.count
-        }
+        LibraryClipQuery.count(in: store.clips, matching: filter)
     }
 }
 

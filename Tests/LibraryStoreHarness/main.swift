@@ -9,6 +9,13 @@ import AppKit
         prefs.set(false, forKey: "autoCopy"); prefs.set(false, forKey: "showNotifications"); prefs.set(false, forKey: "playSound")
         defer { try? FileManager.default.removeItem(at: root); prefs.removePersistentDomain(forName: suite) }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let oldPinned = ClipItem(text: "Pinned book note", appName: "WhatsApp", packageName: "com.whatsapp", timestamp: Date(timeIntervalSince1970: 1), kind: .image, isPinned: true, collection: "Books")
+        let newerClip = ClipItem(text: "Newer note", timestamp: Date(timeIntervalSince1970: 10))
+        let ordered = LibraryClipQuery.visible(in: [newerClip, oldPinned], filter: .all, search: "")
+        precondition(ordered.map(\.id) == [oldPinned.id, newerClip.id], "Pinned clips were not sorted ahead of newer clips")
+        precondition(LibraryClipQuery.visible(in: [newerClip, oldPinned], filter: .collection("Books"), search: "book").map(\.id) == [oldPinned.id], "Collection and text search filters did not compose")
+        precondition(LibraryClipQuery.count(in: [newerClip, oldPinned], matching: .app(.whatsApp)) == 1, "App filter count diverged from the library query")
+        print("PASS library query: pinned ordering, combined search/collection filters, and sidebar counts")
         let repairRoot = root.appendingPathComponent("extension-repair")
         let repairDir = repairRoot.appendingPathComponent("attachments")
         try FileManager.default.createDirectory(at: repairDir, withIntermediateDirectories: true)

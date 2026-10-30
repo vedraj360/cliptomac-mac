@@ -3,7 +3,6 @@ import AppKit
 import UniformTypeIdentifiers
 
 struct LibraryView: View {
-    @Environment(\.colorScheme) private var colorScheme
     @ObservedObject private var store = ClipStore.shared
     @ObservedObject private var transfers = MacTransferService.shared
     @State private var confirmingDelete = false
@@ -20,12 +19,7 @@ struct LibraryView: View {
     @State private var showFilePicker = false
     private var collections: [String] { Array(Set(store.clips.compactMap(\.collection))).sorted() }
     private var visible: [ClipItem] {
-        let matching = store.clips.filter { clip in
-            let passes: Bool
-            switch filter { case .all: passes = true; case .pinned: passes = clip.isPinned; case .sent: passes = clip.direction == "sent"; case .received: passes = clip.direction != "sent"; case .text: passes = clip.kind == .text; case .images: passes = clip.kind == .image; case .files: passes = clip.kind == .file; case .collection(let n): passes = clip.collection == n; case .app(let a): passes = clip.sourceApp == a }
-            return passes && (search.isEmpty || clip.text.localizedCaseInsensitiveContains(search) || clip.appName.localizedCaseInsensitiveContains(search) || (clip.attachmentName?.localizedCaseInsensitiveContains(search) ?? false))
-        }
-        return matching.sorted { ($0.isPinned ? 1 : 0, $0.updatedAt) > ($1.isPinned ? 1 : 0, $1.updatedAt) }
+        LibraryClipQuery.visible(in: store.clips, filter: filter, search: search)
     }
     var body: some View {
         HStack(spacing: 0) {
