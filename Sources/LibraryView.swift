@@ -33,7 +33,20 @@ struct LibraryView: View {
                 .frame(width: 220)
             Rectangle().fill(.primary.opacity(0.08)).frame(width: 1)
             VStack(spacing: 0) {
-                topBar.zIndex(1)
+                LibraryToolbar(
+                    search: $search,
+                    selected: $selected,
+                    selectedDevice: $selectedDevice,
+                    settings: $settings,
+                    title: title,
+                    itemCount: visible.count,
+                    visibleIDs: Set(visible.map(\.id)),
+                    pairedDevices: store.pairedDevices,
+                    onSendClipboard: sendClipboard(to:),
+                    onSendSelected: sendSelected(to:),
+                    onChooseFile: { device in selectedDevice = device; showFilePicker = true }
+                )
+                .zIndex(1)
                 Rectangle().fill(.primary.opacity(0.08)).frame(height: 1)
                 Group {
                     if settings {
@@ -84,24 +97,6 @@ struct LibraryView: View {
             }
             return true
         }
-    }
-    private var topBar: some View {
-        HStack(spacing:12) {
-            VStack(alignment:.leading,spacing:3){ Text(settings ? "Settings & Storage" : title).font(.system(size:22,weight:.semibold)); Text(settings ? "LOCAL LIBRARY" : "\(visible.count) items").font(.system(size:9,weight:.semibold)).tracking(1.2).foregroundStyle(.secondary) }
-            Spacer()
-            if !settings {
-                HStack(spacing:7){ Image(systemName:"magnifyingglass").foregroundStyle(.secondary); TextField("Search",text:$search).textFieldStyle(.plain).frame(width:150) }.padding(8).background(.primary.opacity(0.045),in:RoundedRectangle(cornerRadius:7))
-                Button { selected = selected.isEmpty ? Set(visible.map(\.id)) : [] } label:{ Label(selected.isEmpty ? "Select" : "Done",systemImage:"checkmark.circle") }.buttonStyle(.bordered)
-                Menu { ForEach(store.pairedDevices) { device in Button("Send clipboard to \(device.name)") { sendClipboard(to:device) } } } label: { Label("Send Clipboard",systemImage:"paperplane.fill") }.menuStyle(.borderlessButton).disabled(store.pairedDevices.isEmpty)
-                Menu { ForEach(store.pairedDevices) { device in Button(device.name) { selectedDevice=device } } } label: { Image(systemName:"iphone") }.help("Drop files to this phone: \(selectedDevice?.name ?? "Choose phone")").menuStyle(.borderlessButton).disabled(store.pairedDevices.isEmpty)
-                Menu { ForEach(store.pairedDevices) { device in Button(device.name) { sendSelected(to: device) } } } label: { Image(systemName: "paperplane") }.disabled(selected.isEmpty || store.pairedDevices.isEmpty).help("Send selected clips to a paired phone").menuStyle(.borderlessButton)
-                Menu { ForEach(store.pairedDevices) { device in Button("Choose file for \(device.name)") { selectedDevice=device; showFilePicker=true } } } label:{ Image(systemName:"plus") }.help("Choose a file to send to a phone").menuStyle(.borderlessButton).disabled(store.pairedDevices.isEmpty)
-            } else { Button("Done"){settings=false}.buttonStyle(.bordered) }
-        }
-        .padding(.horizontal,22).padding(.vertical,16)
-        .frame(maxWidth: .infinity)
-        .background(colorScheme == .dark ? Color(red: 0.10, green: 0.115, blue: 0.13) : Color(nsColor: .windowBackgroundColor))
-        .overlay(alignment: .bottom) { Rectangle().fill(.primary.opacity(0.12)).frame(height: 1) }
     }
     private var title:String { switch filter {case .all:return "All Clips";case .pinned:return "Pinned";case .sent:return "Sent";case .received:return "Received";case .text:return "Text";case .images:return "Images";case .files:return "Files";case .collection(let n):return n;case .app(let a):return a.rawValue} }
     private var contentPane: some View {
