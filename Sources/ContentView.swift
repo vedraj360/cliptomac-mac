@@ -2,28 +2,6 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
-private enum ClipboardSendPayload {
-    case text(String)
-    case image(Data)
-    case files([URL])
-
-    var title: String {
-        switch self {
-        case .text: return "Clipboard text"
-        case .image: return "Clipboard image"
-        case .files(let urls): return urls.count == 1 ? urls[0].lastPathComponent : "\(urls.count) files from clipboard"
-        }
-    }
-
-    var preview: String {
-        switch self {
-        case .text(let value): return String(value.trimmingCharacters(in: .whitespacesAndNewlines).prefix(180))
-        case .image: return "The image currently copied on your Mac will be sent as a PNG."
-        case .files(let urls): return urls.prefix(4).map(\.lastPathComponent).joined(separator: "\n") + (urls.count > 4 ? "\n… and \(urls.count - 4) more" : "")
-        }
-    }
-}
-
 public struct ContentView: View {
     @ObservedObject private var store = ClipStore.shared
     @Environment(\.colorScheme) private var colorScheme
@@ -92,7 +70,12 @@ public struct ContentView: View {
                     unpairTarget = nil
                 } cancel: { unpairTarget = nil }
             } else if let payload = clipboardReview {
-                clipboardConfirmation(payload)
+                ClipboardSendConfirmationView(
+                    payload: payload,
+                    canSend: sendDevice != nil && !sendingClipboard,
+                    onCancel: { clipboardReview = nil },
+                    onSend: { sendClipboard(payload) }
+                )
             } else if showPhoneNotificationSettingsPrompt {
                 confirmationPanel(
                     title: "Allow Mac notifications",
@@ -284,81 +267,14 @@ public struct ContentView: View {
     }
 
     private var sendActions: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack(spacing: 8) {
-                Text("SEND TO PHONE").font(.system(size: 9, weight: .semibold)).tracking(1.4).foregroundStyle(.secondary)
-                Spacer()
-                if sendDevices.count > 1 {
-                    Menu {
-                        ForEach(sendDevices) { device in
-                            Button { selectedSendDeviceID = device.id } label: {
-                                if device.id == sendDevice?.id { Label(device.name, systemImage: "checkmark") }
-                                else { Text(device.name) }
-                            }
-                        }
-                    } label: {
-                        Label(sendDevice?.name ?? "Choose phone", systemImage: "iphone")
-                            .font(.system(size: 10, weight: .medium))
-                            .lineLimit(1)
-                    }
-                    .menuStyle(.borderlessButton)
-                } else if let device = sendDevice {
-                    Label(device.name, systemImage: "iphone").font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary).lineLimit(1)
-                } else {
-                    Text("Pair a phone to send").font(.system(size: 10)).foregroundStyle(.secondary)
-                }
-            }
-            HStack(spacing: 8) {
-                Button(action: prepareClipboardReview) {
-                    Label(sendingClipboard ? "Preparing…" : "Send clipboard", systemImage: "doc.on.clipboard")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-                .disabled(sendDevice == nil || sendingClipboard)
-                .help("Review and send the current Mac clipboard")
-
-                Button(action: chooseAttachment) {
-                    Label("Attach file", systemImage: "paperclip")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-                .disabled(sendDevice == nil)
-                .help("Choose a file to send to the paired phone")
-            }
-            if let sendNotice {
-                Text(sendNotice).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(2)
-            }
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 12)
-        .padding(.bottom, 4)
-    }
-
-    private func clipboardConfirmation(_ payload: ClipboardSendPayload) -> some View {
-        ZStack {
-            Color.black.opacity(0.30).onTapGesture { clipboardReview = nil }
-            VStack(alignment: .leading, spacing: 13) {
-                Text("SEND CLIPBOARD").font(.system(size: 9, weight: .semibold)).tracking(1.5).foregroundStyle(.secondary)
-                Text(payload.title).font(.system(size: 16, weight: .semibold)).lineLimit(2)
-                Text(payload.preview.isEmpty ? "The clipboard is empty." : payload.preview)
-                    .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(5).textSelection(.enabled)
-                HStack {
-                    Button("Cancel") { clipboardReview = nil }.keyboardShortcut(.cancelAction)
-                    Spacer()
-                    Button("Send") { sendClipboard(payload) }
-                        .buttonStyle(GraphiteButtonStyle())
-                        .disabled(sendDevice == nil || sendingClipboard)
-                        .keyboardShortcut(.defaultAction)
-                }
-            }
-            .padding(20)
-            .frame(width: 330, alignment: .leading)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 9))
-            .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(.white.opacity(0.18)))
-            .shadow(color: .black.opacity(0.24), radius: 20, y: 8)
-        }
+        SendToPhoneSection(
+            devices: sendDevices,
+            selectedDeviceID: $selectedSendDeviceID,
+            isPreparingClipboard: sendingClipboard,
+            notice: sendNotice,
+            onSendClipboard: prepareClipboardReview,
+            onAttachFile: chooseAttachment(for:)
+        )
     }
 
     private func prepareClipboardReview() {
@@ -381,8 +297,7 @@ public struct ContentView: View {
         sendNotice = "The clipboard has no sendable text, image, or file."
     }
 
-    private func chooseAttachment() {
-        guard let device = sendDevice else { return }
+    private func chooseAttachment(for device: PairedDevice) {
         let panel = NSOpenPanel()
         panel.title = "Choose a file to send to \(device.name)"
         panel.prompt = "Send File"
