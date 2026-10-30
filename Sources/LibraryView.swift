@@ -97,38 +97,43 @@ struct LibraryView: View {
         VStack(spacing:0) {
             if !selected.isEmpty { HStack { Text("\(selected.count) selected"); Button("Pin / Unpin"){store.togglePinned(ids:selected)}; Button("Collection…"){ collectionName = ""; choosingCollection = true }; Button("Export"){exportSelection()}; Button("Delete"){requestDelete(selected)}; Spacer(); Menu("Send to"){ForEach(store.pairedDevices){device in Button(device.name){sendSelected(to:device)}}}.disabled(store.pairedDevices.isEmpty) }.buttonStyle(.bordered).controlSize(.small).padding(12) }
             if visible.isEmpty { VStack(spacing:10){ Image(systemName:search.isEmpty ? "doc.on.clipboard":"magnifyingglass").font(.system(size:30,weight:.ultraLight)).foregroundStyle(.secondary); Text(search.isEmpty ? "No clips here yet":"No matches").font(.system(size:17,weight:.medium)); Text("Items explicitly sent between your paired devices appear here.").font(.system(size:12)).foregroundStyle(.secondary) }.frame(maxWidth:.infinity,maxHeight:.infinity) }
-            else { ScrollView { LazyVStack(spacing:9){ ForEach(visible){ clip in clipRow(clip) } }.padding(18) } }
+            else {
+                ScrollView {
+                    LazyVStack(spacing: 9) {
+                        ForEach(visible) { clip in
+                            LibraryClipRow(
+                                clip: clip,
+                                isSelected: selected.contains(clip.id),
+                                selectionMode: !selected.isEmpty,
+                                pairedDevices: store.pairedDevices,
+                                onToggleSelection: { toggleSelection(clip.id) },
+                                onTogglePin: { store.togglePinned(ids: [clip.id]) },
+                                onCopyText: { store.copyToClipboard(clip) },
+                                onCopyImage: {
+                                    notice = store.copyImageToClipboard(clip)
+                                        ? "Image copied. Paste with ⌘V."
+                                        : "Couldn’t copy image. The file may be missing or unreadable."
+                                },
+                                onOpenURL: { if let url = URL(string: clip.text) { NSWorkspace.shared.open(url) } },
+                                onReveal: {
+                                    if let path = clip.attachmentPath {
+                                        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+                                    }
+                                },
+                                onOpenAttachment: {
+                                    if let path = clip.attachmentPath { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
+                                },
+                                onSend: { send(clip, to: $0) },
+                                onDelete: { requestDelete([clip.id]) }
+                            )
+                        }
+                    }
+                    .padding(18)
+                }
+            }
             transferTray
             if store.undoAvailable { HStack { Text("Clip deleted"); Spacer(); Button("Undo"){store.undoDelete()} }.padding(10).background(.primary.opacity(0.04)) }
         }
-    }
-    private func clipRow(_ clip:ClipItem)->some View {
-        HStack(alignment:.top,spacing:12) {
-            if !selected.isEmpty { Image(systemName:selected.contains(clip.id) ? "checkmark.circle.fill" : "circle").foregroundStyle(selected.contains(clip.id) ? .primary : .secondary).padding(.top,3) }
-            SourceAppIcon(app:clip.sourceApp,package:clip.packageName).frame(width:30,height:30)
-            VStack(alignment:.leading,spacing:8) {
-                HStack(spacing:7){ Text(clip.appName).font(.system(size:12,weight:.medium)); Text(clip.direction.uppercased()).font(.system(size:8,weight:.semibold)).tracking(1).foregroundStyle(.secondary); Spacer(); if clip.repeatCount>1 { Text("×\(clip.repeatCount)").font(.system(size:10,weight:.medium)).foregroundStyle(.secondary) }; Text(clip.relativeTime).font(.system(size:10)).foregroundStyle(.secondary); Button { store.togglePinned(ids:[clip.id]) } label:{ Image(systemName:clip.isPinned ? "pin.fill":"pin").foregroundStyle(clip.isPinned ? .primary : .secondary) }.buttonStyle(.plain) }
-                if clip.kind == .image, let path = clip.attachmentPath, let image = NSImage(contentsOfFile: path) { Image(nsImage: image).resizable().aspectRatio(contentMode: .fit).frame(maxHeight: 160).clipShape(RoundedRectangle(cornerRadius: 6)) }
-                if clip.kind == .text { Text(clip.text).font(.system(size:13)).lineSpacing(3).lineLimit(4).textSelection(.enabled) } else { Label(clip.attachmentName ?? clip.kind.rawValue,systemImage:clip.kind == .image ? "photo":"doc").font(.system(size:13)); if let p=clip.attachmentPath { Text(p).font(.system(size:10)).foregroundStyle(.secondary).lineLimit(1) } }
-                HStack(spacing:14) {
-                    if clip.kind == .text { Button("Copy"){ store.copyToClipboard(clip) }.buttonStyle(.plain) }
-                    if clip.kind == .image { Button("Copy image") { notice = store.copyImageToClipboard(clip) ? "Image copied. Paste with ⌘V." : "Couldn’t copy image. The file may be missing or unreadable." }.buttonStyle(.plain) }
-                    if clip.isURL, let url=URL(string:clip.text) { Button("Open"){ NSWorkspace.shared.open(url) }.buttonStyle(.plain) }
-                    if let path=clip.attachmentPath { Button("Reveal"){ NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath:path)]) }.buttonStyle(.plain); Button("Open"){ NSWorkspace.shared.open(URL(fileURLWithPath:path)) }.buttonStyle(.plain) }
-                    Spacer()
-                    if clip.direction != "sent", !store.pairedDevices.isEmpty { Menu { ForEach(store.pairedDevices){ d in Button(d.name){ send(clip,to:d) } } } label:{ Image(systemName:"paperplane") }.menuStyle(.borderlessButton).help("Send to phone") }
-                    Button { requestDelete([clip.id]) } label:{ Image(systemName:"trash").foregroundStyle(.secondary) }.buttonStyle(.plain).help("Delete on this Mac")
-                }.font(.system(size:11,weight:.medium))
-            }
-        }.padding(14).background(.primary.opacity(selected.contains(clip.id) ? 0.075 : 0.035),in:RoundedRectangle(cornerRadius:8)).overlay(RoundedRectangle(cornerRadius:8).strokeBorder(.primary.opacity(0.07)))
-            .contentShape(Rectangle()).onTapGesture { if !selected.isEmpty { toggleSelection(clip.id) } }
-            .onDrag {
-                let provider: NSItemProvider
-                if let path = clip.attachmentPath { provider = NSItemProvider(object: URL(fileURLWithPath: path) as NSURL) }
-                else { provider = NSItemProvider(object: clip.text as NSString) }
-                provider.registerDataRepresentation(forTypeIdentifier: "com.vdx.cliptomac.library-item", visibility: .all) { completion in completion(Data(clip.id.uuidString.utf8), nil); return nil }
-                return provider
-            }
     }
     private func requestDelete(_ ids: Set<UUID>) { deleteTargets = ids; deleteFileChoice = store.deleteStoredFilesByDefault; confirmingDelete = true }
     private func toggleSelection(_ id:UUID){ if selected.contains(id){selected.remove(id)}else{selected.insert(id)} }
