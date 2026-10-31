@@ -19,7 +19,7 @@ final class BucketTransferStorage: @unchecked Sendable {
         try? FileManager.default.createDirectory(at: self.root, withIntermediateDirectories: true)
     }
     private func directory(_ owner: String, _ id: String) throws -> URL {
-        guard id.range(of: "^[A-Za-z0-9_-]{1,128}$", options: .regularExpression) != nil else { throw BucketError.invalid("Invalid transfer ID") }
+        guard ClipToMacProtocol.isValidTransferIdentifier(id) else { throw BucketError.invalid("Invalid transfer ID") }
         return root.appendingPathComponent(TransferVerifier.digest(Data(owner.utf8))).appendingPathComponent(id)
     }
     private func load(_ directory: URL) throws -> Receipt { try JSONDecoder().decode(Receipt.self, from: Data(contentsOf: directory.appendingPathComponent("receipt.json"))) }

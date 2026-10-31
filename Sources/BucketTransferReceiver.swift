@@ -3,16 +3,16 @@ import Foundation
 extension HTTPServer {
     /// Authenticate on the main actor, perform disk/checksum work off the UI thread.
     @MainActor func routeBuckets(_ fd: Int32, _ req: Request, device: PairedDevice) -> Bool {
-        guard req.path.hasPrefix("/buckets/") else { return false }
+        guard req.path.hasPrefix(ClipToMacProtocol.HTTP.Path.bucketsPrefix) else { return false }
         let pieces = req.path.split(separator: "/").map(String.init)
         let owner = device.id
-        if req.method == "GET", pieces.count == 3, pieces[2] == "control" {
-            guard pieces[1].range(of: "^[A-Za-z0-9_-]{1,128}$", options: .regularExpression) != nil else { respond(fd, 400, ["error": "Invalid transfer ID"]); return true }
+        if req.method == ClipToMacProtocol.HTTP.Method.get, pieces.count == 3, pieces[2] == ClipToMacProtocol.HTTP.Path.bucketControlSegment {
+            guard ClipToMacProtocol.isValidTransferIdentifier(pieces[1]) else { respond(fd, 400, ["error": HTTPServerErrors.invalidTransferIdentifier]); return true }
             respond(fd, 200, ["state": IncomingTransferControls.shared.state(owner: owner, id: pieces[1])]); return true
         }
-        if req.method == "POST", req.path == "/buckets/start" {
-            guard let manifest = try? JSONDecoder().decode(TransferManifest.self, from: req.body) else { respond(fd, 400, ["error": "Invalid manifest"]); return true }
-            do { try manifest.validate() } catch { respond(fd, 400, ["error": "Invalid manifest"]); return true }
+        if req.method == ClipToMacProtocol.HTTP.Method.post, req.path == ClipToMacProtocol.HTTP.Path.bucketStart {
+            guard let manifest = try? JSONDecoder().decode(TransferManifest.self, from: req.body) else { respond(fd, 400, ["error": HTTPServerErrors.invalidManifest]); return true }
+            do { try manifest.validate() } catch { respond(fd, 400, ["error": HTTPServerErrors.invalidManifest]); return true }
             if ClipStore.shared.seenTransferAttempt(TransferIdentity.scoped(owner: owner, id: manifest.transferId)) {
                 respond(fd, 200, ["received": [Int](), "complete": true]); return true
             }
@@ -38,8 +38,8 @@ extension HTTPServer {
                 catch let error as IncomingTransferControls.ControlError { self.respond(fd, error.status, ["error": error.localizedDescription]) }
                 catch { self.respond(fd, 400, ["error": error.localizedDescription]) }
             }
-        } else if req.method == "PUT", pieces.count == 3, let index = Int(pieces[2]) {
-            let checksum = req.headers["x-bucket-sha256"] ?? ""
+        } else if req.method == ClipToMacProtocol.HTTP.Method.put, pieces.count == 3, let index = Int(pieces[2]) {
+            let checksum = req.headers[ClipToMacProtocol.HTTP.Header.bucketChecksum] ?? ""
             Task.detached {
                 do {
                     let (manifest, bytes) = try BucketTransferStorage.shared.put(owner: owner, id: pieces[1], index: index, bytes: req.body, checksum: checksum)
@@ -50,7 +50,7 @@ extension HTTPServer {
                 catch let error as IncomingTransferControls.ControlError { self.respond(fd, error.status, ["error": error.localizedDescription]) }
                 catch { self.respond(fd, 400, ["error": error.localizedDescription]) }
             }
-        } else if req.method == "POST", pieces.count == 3, pieces[2] == "complete" {
+        } else if req.method == ClipToMacProtocol.HTTP.Method.post, pieces.count == 3, pieces[2] == ClipToMacProtocol.HTTP.Path.bucketCompleteSegment {
             let committedID = String(TransferVerifier.digest(Data(owner.utf8)).prefix(16)) + "-" + pieces[1]
             if ClipStore.shared.seenTransferAttempt(committedID) { respond(fd, 200, ["status": "complete"]); return true }
             let destination = ClipStore.shared.attachmentDirectory
@@ -77,7 +77,7 @@ extension HTTPServer {
                     self.respond(fd, 400, ["error": error.localizedDescription])
                 }
             }
-        } else if req.method == "DELETE", pieces.count == 2 {
+        } else if req.method == ClipToMacProtocol.HTTP.Method.delete, pieces.count == 2 {
             Task.detached {
                 do {
                     if IncomingTransferControls.shared.state(owner: owner, id: pieces[1]) != "cancelled" {
@@ -87,10 +87,10 @@ extension HTTPServer {
                 catch let error as IncomingTransferControls.ControlError { self.respond(fd, error.status, ["error": error.localizedDescription]) }
                 catch { self.respond(fd, 400, ["error": error.localizedDescription]) }
             }
-        } else if req.method == "GET", pieces.count == 4, pieces[1] == "download",
+        } else if req.method == ClipToMacProtocol.HTTP.Method.get, pieces.count == 4, pieces[1] == ClipToMacProtocol.HTTP.Path.bucketDownloadSegment,
                   let manifest = MacTransferService.shared.bucketManifest(id: pieces[2], token: device.token),
                   let file = MacTransferService.shared.download(transferID: pieces[2], token: device.token) {
-            if pieces[3] == "manifest" { respond(fd, 200, manifest.json) }
+            if pieces[3] == ClipToMacProtocol.HTTP.Path.bucketManifestSegment { respond(fd, 200, manifest.json) }
             else if let index = Int(pieces[3]) {
                 Task.detached {
                     do {
@@ -104,8 +104,8 @@ extension HTTPServer {
                     } catch let error as IncomingTransferControls.ControlError { self.respond(fd, error.status, ["error": error.localizedDescription]) }
                 catch { self.respond(fd, 400, ["error": error.localizedDescription]) }
                 }
-            } else { respond(fd, 400, ["error": "Invalid bucket index"]) }
-        } else { respond(fd, 404, ["error": "Bucket transfer unavailable"]) }
+            } else { respond(fd, 400, ["error": HTTPServerErrors.invalidBucketIndex]) }
+        } else { respond(fd, 404, ["error": HTTPServerErrors.bucketTransferUnavailable]) }
         return true
     }
 }

@@ -16,9 +16,10 @@ struct TransferManifest: Codable, Equatable {
     let timestamp: Int64
     var bucketCount: Int { size == 0 ? 0 : Int((size - 1) / Int64(bucketSize) + 1) }
     func validate() throws {
-        guard protocolVersion == 2, transferId.range(of: "^[A-Za-z0-9_-]{1,128}$", options: .regularExpression) != nil,
+        guard protocolVersion == ClipToMacProtocol.transferVersion,
+              ClipToMacProtocol.isValidTransferIdentifier(transferId),
               size >= 0, bucketSize == Self.bucketBytes, ["file", "image"].contains(kind),
-              sha256.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil,
+              ClipToMacProtocol.isSHA256Hex(sha256),
               name.utf8.count <= 1024, mimeType.utf8.count <= 255 else { throw BucketError.invalid("Invalid transfer manifest") }
     }
     func length(_ index: Int) throws -> Int {

@@ -235,7 +235,7 @@ public final class MacTransferService: ObservableObject {
 
     public func acceptIncoming(metadata: [String: Any], body: Data, token: String) -> Bool {
         guard let device = ClipStore.shared.pairedDevices.first(where: { $0.securePairing == true && !$0.token.isEmpty && $0.token == token }),
-              let wireID = metadata["transferId"] as? String, wireID.range(of: "^[A-Za-z0-9_-]{1,128}$", options: .regularExpression) != nil,
+              let wireID = metadata["transferId"] as? String, ClipToMacProtocol.isValidTransferIdentifier(wireID),
               let kind = metadata["kind"] as? String, ["text", "image", "file"].contains(kind), body.count <= Self.maxBytes else { return false }
         let id = TransferIdentity.scoped(owner: device.id, id: wireID)
         if ClipStore.shared.seenTransferAttempt(id) { return true }

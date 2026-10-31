@@ -11,18 +11,18 @@ public final class HTTPServer {
     private var serverFd: Int32 = -1
     private var isRunning = false
     private let queue = DispatchQueue(label: "com.vdx.cliptomac.server", qos: .userInitiated)
-    private let connectionSlots = DispatchSemaphore(value: 6)
+    private let connectionSlots = DispatchSemaphore(value: ClipToMacProtocol.HTTP.maximumConcurrentConnections)
     @MainActor private static let pairingPolicy = PairingRequestPolicy()
     @MainActor private var inboxWaiters = 0
     @MainActor private var notificationReplyWaiters = 0
-    private let maxBody = 25 * 1024 * 1024
+    private let maxBody = ClipToMacProtocol.HTTP.maximumBodyBytes
 
     public func start(port: Int = 5678) {
         #if CLIPTOMAC_TRANSFER_TEST
         startTestHTTP(port: port)
         #else
         do { try startTLS(port: port) }
-        catch { Task { @MainActor in SecurePairing.shared.error = "Secure server could not start. Unlock your Keychain and restart ClipToMac." } }
+        catch { Task { @MainActor in SecurePairing.shared.error = HTTPServerErrors.tlsServerStartFailed } }
         #endif
     }
 
@@ -37,7 +37,7 @@ public final class HTTPServer {
         let listener = try NWListener(using: parameters, on: endpoint)
         tlsListener = listener
         listener.stateUpdateHandler = { state in
-            if case .failed = state { Task { @MainActor in SecurePairing.shared.error = "Secure server could not listen on this port. Restart ClipToMac after closing other copies." } }
+            if case .failed = state { Task { @MainActor in SecurePairing.shared.error = HTTPServerErrors.tlsListenerFailed } }
         }
         listener.newConnectionHandler = { [weak self] connection in
             guard let self, self.connectionSlots.wait(timeout: .now()) == .success else { connection.cancel(); return }
@@ -65,7 +65,7 @@ public final class HTTPServer {
             setsockopt(self.serverFd, SOL_SOCKET, SO_REUSEADDR, &opt, socklen_t(MemoryLayout<Int32>.size))
             var addr = sockaddr_in(); addr.sin_family = sa_family_t(AF_INET); addr.sin_port = in_port_t(port).bigEndian; addr.sin_addr.s_addr = in_addr_t(0)
             let bound = withUnsafePointer(to: &addr) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(self.serverFd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) } }
-            guard bound == 0, listen(self.serverFd, 15) == 0 else { close(self.serverFd); self.serverFd = -1; return }
+            guard bound == 0, listen(self.serverFd, ClipToMacProtocol.HTTP.testListenerBacklog) == 0 else { close(self.serverFd); self.serverFd = -1; return }
             self.isRunning = true
             while self.isRunning {
                 self.connectionSlots.wait()
@@ -85,28 +85,28 @@ public final class HTTPServer {
     struct Request { var method: String; var path: String; var headers: [String: String]; var body: Data }
 
     private func handleClient(_ fd: Int32) {
-        var timeout = timeval(tv_sec: 15, tv_usec: 0)
+        var timeout = timeval(tv_sec: ClipToMacProtocol.HTTP.clientSocketTimeoutSeconds, tv_usec: 0)
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
         #if !os(Linux)
         var noSigPipe: Int32 = 1
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
         #endif
-        guard let req = readRequest(fd) else { respond(fd, 400, ["error": "Invalid or incomplete request"]); return }
+        guard let req = readRequest(fd) else { respond(fd, 400, ["error": HTTPServerErrors.invalidRequest]); return }
         Task { @MainActor in self.route(fd, req) }
     }
 
     private func readRequest(_ fd: Int32) -> Request? {
-        let deadline = ProcessInfo.processInfo.systemUptime + 30
+        let deadline = ProcessInfo.processInfo.systemUptime + ClipToMacProtocol.HTTP.requestDeadlineSeconds
         var data = Data(); let delimiter = Data("\r\n\r\n".utf8); var headerEnd: Range<Data.Index>?
-        var buffer = [UInt8](repeating: 0, count: 32 * 1024)
+        var buffer = [UInt8](repeating: 0, count: ClipToMacProtocol.HTTP.maximumHeaderBytes)
         while headerEnd == nil {
             guard ProcessInfo.processInfo.systemUptime < deadline else { return nil }
             let n = recv(fd, &buffer, buffer.count, 0); guard n > 0 else { return nil }
             data.append(contentsOf: buffer.prefix(n))
             headerEnd = data.range(of: delimiter)
-            if headerEnd == nil && data.count > 32 * 1024 { return nil }
-            if let found = headerEnd, found.lowerBound > 32 * 1024 { return nil }
+            if headerEnd == nil && data.count > ClipToMacProtocol.HTTP.maximumHeaderBytes { return nil }
+            if let found = headerEnd, found.lowerBound > ClipToMacProtocol.HTTP.maximumHeaderBytes { return nil }
         }
         guard let split = headerEnd, let headerText = String(data: data[..<split.lowerBound], encoding: .utf8) else { return nil }
         let lines = headerText.components(separatedBy: "\r\n"); guard let first = lines.first else { return nil }
@@ -118,14 +118,14 @@ public final class HTTPServer {
             let value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
             guard !key.isEmpty, headers[key] == nil else { return nil }; headers[key] = value
         }
-        if headers["transfer-encoding"] != nil { return nil } // chunked framing is intentionally unsupported
-        let length = Int(headers["content-length"] ?? "0")
+        if headers[ClipToMacProtocol.HTTP.Header.transferEncoding] != nil { return nil } // chunked framing is intentionally unsupported
+        let length = Int(headers[ClipToMacProtocol.HTTP.Header.contentLength] ?? "0")
         let path = String(parts[1]).components(separatedBy: "?")[0]
-        let bodyLimit = path == "/pair/request" ? 4096 : (path == "/notifications/relay" ? 64 * 1024 : (path.hasPrefix("/buckets/") ? TransferManifest.bucketBytes : maxBody))
+        let bodyLimit = ClipToMacProtocol.HTTP.bodyLimit(for: path)
         guard let length, length >= 0, length <= bodyLimit else { return nil }
         let bodyStart = split.upperBound
-        let live = parts[0] == "PUT" && headers["origin"] == nil && headers["sec-fetch-site"] == nil
-            ? IncomingByteProgress.shared.reader(token: headers["x-cliptomac-token"] ?? "", path: path, length: length) : nil
+        let live = parts[0] == ClipToMacProtocol.HTTP.Method.put && headers[ClipToMacProtocol.HTTP.Header.origin] == nil && headers[ClipToMacProtocol.HTTP.Header.fetchSite] == nil
+            ? IncomingByteProgress.shared.reader(token: headers[ClipToMacProtocol.HTTP.Header.authenticationToken] ?? "", path: path, length: length) : nil
         live?(min(length, data.count - bodyStart))
         while data.count - bodyStart < length {
             guard ProcessInfo.processInfo.systemUptime < deadline else { return nil }
@@ -137,53 +137,53 @@ public final class HTTPServer {
     }
 
     @MainActor private func route(_ fd: Int32, _ req: Request) {
-        let token = req.headers["x-cliptomac-token"] ?? ""
+        let token = req.headers[ClipToMacProtocol.HTTP.Header.authenticationToken] ?? ""
         // Browser scripts are not API clients. Reject origins even when the token is valid.
-        guard req.headers["origin"] == nil, req.headers["sec-fetch-site"] == nil else { respond(fd, 403, ["error": "Browser requests are not allowed"]); return }
-        if req.method == "OPTIONS" { respond(fd, 403, ["error": "Browser requests are not allowed"]); return }
-        if req.method == "GET" && (req.path == "/ping" || req.path == "/") {
+        guard req.headers[ClipToMacProtocol.HTTP.Header.origin] == nil, req.headers[ClipToMacProtocol.HTTP.Header.fetchSite] == nil else { respond(fd, 403, ["error": HTTPServerErrors.browserRequestsForbidden]); return }
+        if req.method == ClipToMacProtocol.HTTP.Method.options { respond(fd, 403, ["error": HTTPServerErrors.browserRequestsForbidden]); return }
+        if req.method == ClipToMacProtocol.HTTP.Method.get && (req.path == ClipToMacProtocol.HTTP.Path.ping || req.path == ClipToMacProtocol.HTTP.Path.root) {
             let store = ClipStore.shared
             if !token.isEmpty {
-                guard let device = validDevice(token) else { respond(fd, 401, ["error": "Secure pairing required or device revoked"]); return }
+                guard let device = validDevice(token) else { respond(fd, 401, ["error": HTTPServerErrors.securePairingRequired]); return }
                 store.markDeviceSeen(id: device.id)
             }
-            respond(fd, 200, ["status": "ok", "service": "ClipToMac", "device": Host.current().localizedName ?? "MacBook", "isPaired": store.hasPairedDevices, "transferProtocol": 2, "securityProtocol": 3]); return
+            respond(fd, 200, ["status": "ok", "service": ClipToMacProtocol.serviceName, "device": Host.current().localizedName ?? "MacBook", "isPaired": store.hasPairedDevices, "transferProtocol": ClipToMacProtocol.transferVersion, "securityProtocol": ClipToMacProtocol.securePairingVersion]); return
         }
-        if req.method == "POST" && req.path == "/pair/request" {
-            guard let obj = try? JSONSerialization.jsonObject(with: req.body) as? [String: Any] else { respond(fd, 400, ["error": "Invalid JSON"]); return }
+        if req.method == ClipToMacProtocol.HTTP.Method.post && req.path == ClipToMacProtocol.HTTP.Path.pairRequest {
+            guard let obj = try? JSONSerialization.jsonObject(with: req.body) as? [String: Any] else { respond(fd, 400, ["error": HTTPServerErrors.invalidJSON]); return }
             guard let deviceId = obj["deviceId"] as? String, let deviceName = obj["deviceName"] as? String,
                   let code = obj["code"] as? String, PairingRequestPolicy.valid(id: deviceId, name: deviceName, code: code) else {
-                respond(fd, 400, ["error": "Invalid pairing details"]); return
+                respond(fd, 400, ["error": HTTPServerErrors.invalidPairingDetails]); return
             }
-            guard obj["protocolVersion"] as? Int == 3, let enrollmentNonce = obj["nonce"] as? String,
-                  SecurePairing.shared.consume(enrollmentNonce) else { respond(fd, 403, ["error": "Open a fresh pairing QR on your Mac and scan it again."]); return }
-            guard Self.pairingPolicy.begin() else { respond(fd, 429, ["error": "Too many pairing requests. Try again shortly."]); return }
+            guard obj["protocolVersion"] as? Int == ClipToMacProtocol.securePairingVersion, let enrollmentNonce = obj["nonce"] as? String,
+                  SecurePairing.shared.consume(enrollmentNonce) else { respond(fd, 403, ["error": HTTPServerErrors.freshPairingQRRequired]); return }
+            guard Self.pairingPolicy.begin() else { respond(fd, 429, ["error": HTTPServerErrors.pairingRateLimited]); return }
             defer { Self.pairingPolicy.finish() }
-            guard let newToken = try? PairingRequestPolicy.token() else { respond(fd, 500, ["error": "Could not generate credentials"]); return }
+            guard let newToken = try? PairingRequestPolicy.token() else { respond(fd, 500, ["error": HTTPServerErrors.credentialGenerationFailed]); return }
             if PairingDialog.request(deviceName: deviceName, code: code) {
                 guard ClipStore.shared.saveTrustedDevice(id: deviceId, name: deviceName, token: newToken, securePairing: true) else {
-                    respond(fd, 500, ["error": "Could not securely save pairing"]); return
+                    respond(fd, 500, ["error": HTTPServerErrors.pairingPersistenceFailed]); return
                 }
                 ClipStore.shared.markDeviceSeen(id: deviceId)
-                respond(fd, 200, ["status": "ok", "token": newToken, "securityProtocol": 3, "macName": Host.current().localizedName ?? "MacBook"])
-            } else { respond(fd, 403, ["error": "Pairing declined by user"]) }
+                respond(fd, 200, ["status": "ok", "token": newToken, "securityProtocol": ClipToMacProtocol.securePairingVersion, "macName": Host.current().localizedName ?? "MacBook"])
+            } else { respond(fd, 403, ["error": HTTPServerErrors.pairingDeclined]) }
             return
         }
-        guard let authenticatedDevice = validDevice(token) else { respond(fd, 401, ["error": "Device not paired or invalid token"]); return }
+        guard let authenticatedDevice = validDevice(token) else { respond(fd, 401, ["error": HTTPServerErrors.deviceNotPairedOrTokenInvalid]); return }
         ClipStore.shared.markDeviceSeen(id: authenticatedDevice.id)
-        if req.method == "POST", req.path == "/notifications/relay" {
+        if req.method == ClipToMacProtocol.HTTP.Method.post, req.path == ClipToMacProtocol.HTTP.Path.notificationRelay {
             guard let payload = try? JSONDecoder().decode(PhoneNotificationPayload.self, from: req.body), payload.isValid else {
-                respond(fd, 400, ["error": "Invalid notification payload"]); return
+                respond(fd, 400, ["error": HTTPServerErrors.invalidNotificationPayload]); return
             }
             switch PhoneNotificationRelay.shared.receive(payload, from: authenticatedDevice) {
             case .delivered: respond(fd, 200, ["status": "delivered"])
             case .ignored: respond(fd, 200, ["status": "ignored"])
-            case .rateLimited: respond(fd, 429, ["error": "Notification relay rate limit reached"])
+            case .rateLimited: respond(fd, 429, ["error": HTTPServerErrors.notificationRateLimited])
             }
             return
         }
-        if req.method == "GET", req.path == "/notifications/reply/wait" {
-            guard notificationReplyWaiters < 4 else { respond(fd, 429, ["error": "Too many notification reply waiters"]); return }
+        if req.method == ClipToMacProtocol.HTTP.Method.get, req.path == ClipToMacProtocol.HTTP.Path.notificationReplyWait {
+            guard notificationReplyWaiters < 4 else { respond(fd, 429, ["error": HTTPServerErrors.notificationReplyWaitersLimited]); return }
             notificationReplyWaiters += 1
             Task { @MainActor in
                 defer { notificationReplyWaiters -= 1 }
@@ -196,54 +196,54 @@ public final class HTTPServer {
             }
             return
         }
-        if req.method == "POST", req.path == "/pair/identity", let device = validDevice(token) {
+        if req.method == ClipToMacProtocol.HTTP.Method.post, req.path == ClipToMacProtocol.HTTP.Path.pairIdentity, let device = validDevice(token) {
             guard let object = try? JSONSerialization.jsonObject(with: req.body) as? [String: Any], let id = object["deviceId"] as? String,
-                  ClipStore.shared.migrateDeviceIdentity(token: token, id: id) else { respond(fd, 409, ["error": "Device identity could not be updated"]); return }
+                  ClipStore.shared.migrateDeviceIdentity(token: token, id: id) else { respond(fd, 409, ["error": HTTPServerErrors.deviceIdentityUpdateFailed]); return }
             MacTransferService.shared.migrateOwner(from: device.id, to: id)
             respond(fd, 200, ["status": "ok"]); return
         }
         if let device = validDevice(token), routeBuckets(fd, req, device: device) { return }
-        if req.method == "POST" && req.path == "/pair/unpair" {
-            guard let device = validDevice(token), ClipStore.shared.unpairDevice(id: device.id) else { respond(fd, 500, ["error": "Could not save unpairing"]); return }
+        if req.method == ClipToMacProtocol.HTTP.Method.post && req.path == ClipToMacProtocol.HTTP.Path.pairUnpair {
+            guard let device = validDevice(token), ClipStore.shared.unpairDevice(id: device.id) else { respond(fd, 500, ["error": HTTPServerErrors.unpairPersistenceFailed]); return }
             respond(fd, 200, ["status": "unpaired"]); return
         }
-        if req.method == "POST" && req.path == "/transfer" {
-            guard let encoded = req.headers["x-cliptomac-metadata"], let metaData = Data(base64Encoded: encoded), let meta = try? JSONSerialization.jsonObject(with: metaData) as? [String: Any],
+        if req.method == ClipToMacProtocol.HTTP.Method.post && req.path == ClipToMacProtocol.HTTP.Path.transfer {
+            guard let encoded = req.headers[ClipToMacProtocol.HTTP.Header.transferMetadata], let metaData = Data(base64Encoded: encoded), let meta = try? JSONSerialization.jsonObject(with: metaData) as? [String: Any],
                   let size = meta["size"] as? NSNumber, size.intValue == req.body.count, size.intValue <= maxBody,
                   let kind = meta["kind"] as? String, ["text", "image", "file"].contains(kind),
                   (kind != "text" || String(data: req.body, encoding: .utf8) != nil),
                   ((meta["sha256"] as? String).map { $0.isEmpty || $0.lowercased() == Self.sha256(req.body) } ?? true),
-                  MacTransferService.shared.acceptIncoming(metadata: meta, body: req.body, token: token) else { respond(fd, 400, ["error": "Invalid transfer"]); return }
+                  MacTransferService.shared.acceptIncoming(metadata: meta, body: req.body, token: token) else { respond(fd, 400, ["error": HTTPServerErrors.invalidTransfer]); return }
             respond(fd, 200, ["status": "ok"]); return
         }
-        if req.method == "GET" && req.path == "/inbox/wait" {
-            guard inboxWaiters < 2 else { respond(fd, 429, ["error": "Too many waiting requests"]); return }
+        if req.method == ClipToMacProtocol.HTTP.Method.get && req.path == ClipToMacProtocol.HTTP.Path.inboxWait {
+            guard inboxWaiters < 2 else { respond(fd, 429, ["error": HTTPServerErrors.inboxWaitersLimited]); return }
             inboxWaiters += 1
             Task { @MainActor in
                 defer { inboxWaiters -= 1 }
-                guard let items = await MacTransferService.shared.waitForInbox(token: token), let data = try? JSONSerialization.data(withJSONObject: items) else { self.respond(fd, 401, ["error": "Device no longer paired"]); return }
+                guard let items = await MacTransferService.shared.waitForInbox(token: token), let data = try? JSONSerialization.data(withJSONObject: items) else { self.respond(fd, 401, ["error": HTTPServerErrors.deviceNoLongerPaired]); return }
                 self.respond(fd, 200, raw: data, contentType: "application/json; charset=utf-8")
             }
             return
         }
-        if req.method == "GET" && req.path == "/inbox" {
-            guard let items = MacTransferService.shared.inbox(token: token), let json = try? JSONSerialization.data(withJSONObject: items), let text = String(data: json, encoding: .utf8) else { respond(fd, 500, ["error": "Inbox unavailable"]); return }
+        if req.method == ClipToMacProtocol.HTTP.Method.get && req.path == ClipToMacProtocol.HTTP.Path.inbox {
+            guard let items = MacTransferService.shared.inbox(token: token), let json = try? JSONSerialization.data(withJSONObject: items), let text = String(data: json, encoding: .utf8) else { respond(fd, 500, ["error": HTTPServerErrors.inboxUnavailable]); return }
             respond(fd, 200, raw: Data(text.utf8), contentType: "application/json; charset=utf-8"); return
         }
-        if req.method == "GET" && req.path.hasPrefix("/download/") {
-            let transferID = String(req.path.dropFirst("/download/".count)).removingPercentEncoding ?? ""
+        if req.method == ClipToMacProtocol.HTTP.Method.get && req.path.hasPrefix(ClipToMacProtocol.HTTP.Path.downloadPrefix) {
+            let transferID = String(req.path.dropFirst(ClipToMacProtocol.HTTP.Path.downloadPrefix.count)).removingPercentEncoding ?? ""
             guard let file = MacTransferService.shared.download(transferID: transferID, token: token),
-                  let size = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= maxBody, let bytes = try? Data(contentsOf: file), bytes.count <= maxBody else { respond(fd, 404, ["error": "Transfer unavailable"]); return }
+                  let size = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= maxBody, let bytes = try? Data(contentsOf: file), bytes.count <= maxBody else { respond(fd, 404, ["error": HTTPServerErrors.transferUnavailable]); return }
             respond(fd, 200, raw: bytes, contentType: "application/octet-stream"); return
         }
-        if req.method == "POST" && req.path == "/inbox/ack" {
-            guard let obj = try? JSONSerialization.jsonObject(with: req.body) as? [String: Any], let ids = obj["ids"] as? [String], MacTransferService.shared.acknowledge(ids: ids, token: token) else { respond(fd, 400, ["error": "Invalid acknowledgement"]); return }
+        if req.method == ClipToMacProtocol.HTTP.Method.post && req.path == ClipToMacProtocol.HTTP.Path.inboxAck {
+            guard let obj = try? JSONSerialization.jsonObject(with: req.body) as? [String: Any], let ids = obj["ids"] as? [String], MacTransferService.shared.acknowledge(ids: ids, token: token) else { respond(fd, 400, ["error": HTTPServerErrors.invalidAcknowledgement]); return }
             respond(fd, 200, ["status": "ok"]); return
         }
-        if req.method == "POST" && (req.path == "/clip" || req.path == "/clip/batch"),
+        if req.method == ClipToMacProtocol.HTTP.Method.post && (req.path == ClipToMacProtocol.HTTP.Path.clip || req.path == ClipToMacProtocol.HTTP.Path.clipBatch),
            let obj = try? JSONSerialization.jsonObject(with: req.body) {
             let store = ClipStore.shared
-            if req.path == "/clip/batch", let rows = obj as? [[String: Any]] {
+            if req.path == ClipToMacProtocol.HTTP.Path.clipBatch, let rows = obj as? [[String: Any]] {
                 var count = 0
                 for row in rows {
                     guard let text = row["text"] as? String else { continue }
@@ -263,9 +263,9 @@ public final class HTTPServer {
                 }
                 respond(fd, 200, ["status": "ok"]); return
             }
-            respond(fd, 400, ["error": "Invalid payload"]); return
+            respond(fd, 400, ["error": HTTPServerErrors.invalidPayload]); return
         }
-        respond(fd, 404, ["error": "Not Found"])
+        respond(fd, 404, ["error": HTTPServerErrors.notFound])
     }
 
     @MainActor private func validDevice(_ token: String) -> PairedDevice? {
@@ -282,7 +282,7 @@ public final class HTTPServer {
     }
     private func writeResponse(_ fd: Int32, _ status: Int, _ body: Data, _ contentType: String, _ extraHeaders: [String: String]) {
         defer { close(fd); connectionSlots.signal() }
-        let label = [200: "OK", 204: "No Content", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found", 410: "Gone", 423: "Locked", 429: "Too Many Requests", 500: "Internal Server Error"][status] ?? "Error"
+        let label = [200: "OK", 204: "No Content", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: HTTPServerErrors.notFound, 410: "Gone", 423: "Locked", 429: "Too Many Requests", 500: "Internal Server Error"][status] ?? "Error"
         let extra = extraHeaders.map { "\($0.key): \($0.value)\r\n" }.joined()
         let head = Data("HTTP/1.1 \(status) \(label)\r\nContent-Type: \(contentType)\r\nContent-Length: \(body.count)\r\nConnection: close\r\n\(extra)Cache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n\r\n".utf8)
         func write(_ data: Data) -> Bool {

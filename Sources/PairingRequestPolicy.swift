@@ -12,10 +12,10 @@ import Security
     }
     func finish() { presenting = false }
     static func valid(id: String, name: String, code: String) -> Bool {
-        id.range(of: "^[A-Za-z0-9_-]{1,128}$", options: .regularExpression) != nil &&
+        ClipToMacProtocol.isValidTransferIdentifier(id) &&
         !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && name.utf8.count <= 128 &&
         name.unicodeScalars.allSatisfy { !CharacterSet.controlCharacters.contains($0) && !CharacterSet(charactersIn: "\u{202A}\u{202B}\u{202C}\u{202D}\u{202E}\u{2066}\u{2067}\u{2068}\u{2069}").contains($0) } &&
-        code.range(of: "^[0-9]{6}$", options: .regularExpression) != nil
+        ClipToMacProtocol.isPairingCode(code)
     }
     static func token() throws -> String {
         var bytes = [UInt8](repeating: 0, count: 32)
