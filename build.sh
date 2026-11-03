@@ -2,7 +2,8 @@
 set -e
 
 APP_NAME="ClipToMac"
-BUNDLE_DIR="$APP_NAME.app"
+BUILD_ROOT="${CLIPTOMAC_BUILD_DIR:-${TMPDIR:-/tmp}/cliptomac-build}"
+BUNDLE_DIR="$BUILD_ROOT/$APP_NAME.app"
 MACOS_DIR="$BUNDLE_DIR/Contents/MacOS"
 RESOURCES_DIR="$BUNDLE_DIR/Contents/Resources"
 
@@ -41,8 +42,6 @@ cat << 'PLIST' > "$BUNDLE_DIR/Contents/Info.plist"
     <string>1</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
-    <key>LSUIElement</key>
-    <true/>
     <key>NSLocalNetworkUsageDescription</key>
     <string>Securely transfer clips and files with your paired phone on your local network.</string>
     <key>NSHighResolutionCapable</key>

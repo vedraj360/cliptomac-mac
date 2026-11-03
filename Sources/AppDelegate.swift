@@ -43,6 +43,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             button.target = self
             button.action = #selector(togglePopover)
         }
+        statusItem.autosaveName = "com.vdx.cliptomac.menu-bar"
+        statusItem.isVisible = true
+        NSLog("ClipToMac: menu bar item registered and visible")
         outsideMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] _ in
             guard NSApp.modalWindow == nil else { return }
             self?.panel.orderOut(nil)
@@ -56,6 +59,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             return event
         }
         NotificationCenter.default.addObserver(self, selector: #selector(onNewClip), name: NSNotification.Name("NewClipReceived"), object: nil)
+        openLibrary()
+    }
+
+    public func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        if !hasVisibleWindows { openLibrary() }
+        return true
     }
 
     @objc public func openLibrary() {
