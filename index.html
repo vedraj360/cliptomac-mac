@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Move clips and files between Android and Mac, and see selected phone notifications on your desktop.">
+  <meta name="theme-color" content="#0b0d10">
+  <title>ClipToMac — Android and Mac, in sync</title>
+  <link rel="icon" href="assets/cliptomac.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="shell topbar">
+    <a class="brand" href="#"><img src="assets/cliptomac.png" alt="" width="36" height="36">ClipToMac</a>
+    <nav aria-label="Main"><a href="#features">How it works</a><a href="#all-features">Features</a><a href="#downloads">Downloads</a><a href="#faq">FAQ</a></nav>
+    <a class="button quiet source-link" href="https://github.com/vedraj360/cliptomac-mac">Source code <span aria-hidden="true">↗</span></a>
+  </header>
+  <main id="main" class="shell">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <p class="eyebrow">For Android and Mac</p>
+        <h1 id="hero-title">Copy on Android.<br>Pick up on Mac.</h1>
+        <p>Preview what you copy on your phone, send it to your Mac, and find it again in the Library. ClipToMac also sends files both ways and forwards alerts from the Android apps you choose.</p>
+        <div class="hero-actions">
+          <a class="button primary" href="#downloads">Downloads</a>
+          <a href="#features">See how it works ↓</a>
+        </div>
+        <p class="hero-note">Android 8+ · Apple silicon Mac with macOS 13+</p>
+      </div>
+      <div id="screenshots" class="product-shots">
+        <figure class="product-shot product-shot-phone">
+          <img src="assets/android-copy-overlay.png" width="720" height="465" alt="ClipToMac copy preview on Android with a Send to Mac button">
+          <figcaption><span>01 / Android</span> Preview a copy and tap Send to Mac.</figcaption>
+        </figure>
+        <figure class="product-shot product-shot-mac">
+          <img src="assets/mac-library.png" width="2080" height="1300" alt="Mac Library with sample clips and filters for sent and received items">
+          <figcaption><span>02 / Mac</span> Find incoming clips under Received. Sample library shown.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section id="features" class="section feature">
+      <div>
+        <p class="eyebrow">Clipboard and files</p>
+        <h2>Send in either direction.</h2>
+        <p>On Android, send from the copy preview or the Share menu. On Mac, use Send Clipboard or choose a file. Search and pin clips in the Library so you can find them later.</p>
+        <p>Choose which Android apps can show the copy preview. For supported uploads to Mac, you can pause, resume, or cancel the transfer.</p>
+      </div>
+      <div class="feature-captures">
+        <figure class="product-shot">
+          <img src="assets/android-home.png" width="720" height="1604" loading="lazy" alt="Android Home showing the connected Mac, recent clips, and Send to Mac in Oxanium">
+          <figcaption>Android Home and recent clips.</figcaption>
+        </figure>
+        <figure class="product-shot">
+          <img src="assets/mac-menu.png" width="840" height="1240" loading="lazy" alt="ClipToMac menu bar panel with sample clips, search, and Open Library">
+          <figcaption>Mac menu bar panel with recent clips.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section id="notifications" class="section split">
+      <div><p class="eyebrow">Phone notifications</p><h2>Choose which alerts reach your Mac.</h2></div>
+      <div>
+        <p>Pick the Android apps you want to hear from. Choose native macOS notifications that follow Focus or custom banners with source app icons and inline controls.</p>
+        <p>Reply or mark a message as read when the Android notification supports it. Mute an app for an hour or find the latest 50 alerts in the Mac Library.</p>
+      </div>
+    </section>
+
+    <section id="security" class="section split">
+      <div><p class="eyebrow">Pairing and privacy</p><h2>Encrypted over your local network.</h2></div>
+      <div>
+        <p>Clips, files, and forwarded notifications travel directly between paired devices over HTTPS. Scan a one-use QR code, compare the confirmation code, and approve pairing on the Mac.</p>
+        <p>Android verifies the Mac’s certificate on every connection. The Mac keeps its Library and recent phone alerts locally.</p>
+      </div>
+    </section>
+
+    <section id="all-features" class="section">
+      <p class="eyebrow">Feature guide</p>
+      <h2>Everything you can do today</h2>
+      <dl class="feature-grid">
+        <div><dt>Copy preview and app filters</dt><dd>Preview text as you copy it in supported Android apps. Allow the overlay everywhere or choose specific apps. Use Share for apps where copy detection is unavailable.</dd></div>
+        <div><dt>Two-way clipboard and file transfers</dt><dd>Send text, links, images, and files. Use Android Share, the copy preview, or Send Clipboard on Mac. Enable automatic receiving on Android or copy received clips to the Mac clipboard on arrival.</dd></div>
+        <div><dt>Progress and retries</dt><dd>Track progress and pause, resume, or cancel supported Android-to-Mac file uploads. Android queues eligible sends for retry when the Mac is offline.</dd></div>
+        <div><dt>Clip history and organization</dt><dd>Browse local history. On Mac, search and filter by direction, type, or source app. Pin clips, organize them into collections, and copy or resend items from the Library.</dd></div>
+        <div><dt>Mac shortcuts and storage</dt><dd>Open the Library with a configurable global shortcut or use the menu bar. Set ClipToMac to launch at login, choose where attachments are saved, and export or import a Library backup.</dd></div>
+        <div><dt>Phone alerts and replies</dt><dd>Choose which Android apps forward alerts. Use native macOS notifications or custom banners with source icons. Reply or mark as read where supported, mute an app for an hour, and revisit or clear the latest 50 forwarded alerts.</dd></div>
+        <div><dt>Secure local pairing</dt><dd>Pair using a one-use QR code and verify the confirmation code on both devices. Transfers and forwarded alerts use pinned HTTPS on the local network.</dd></div>
+      </dl>
+    </section>
+
+    <section id="downloads" class="section split">
+      <div><p class="eyebrow">Downloads</p><h2>Android and Mac releases</h2></div>
+      <div>
+        <p>GitHub Releases is where installable builds will appear. The first downloadable builds are pending. You can build either app from source today.</p>
+        <dl class="feature-list">
+          <div><dt>Android APK</dt><dd>Android 8 or later. <a href="https://github.com/vedraj360/cliptomac-android/releases">Android releases ↗</a></dd></div>
+          <div><dt>Mac ZIP</dt><dd>Apple silicon with macOS 13 or later. <a href="https://github.com/vedraj360/cliptomac-mac/releases">Mac releases ↗</a></dd></div>
+        </dl>
+        <p><a href="#setup">Install from source ↓</a></p>
+      </div>
+    </section>
+
+    <section id="setup" class="section setup">
+      <div>
+        <p class="eyebrow">Setup</p>
+        <h2>Install, pair, and send.</h2>
+        <p>Android 8 or later and an Apple silicon Mac running macOS 13 or later. Follow the source install guides for your devices.</p>
+        <div class="setup-links">
+          <a class="button primary" href="https://github.com/vedraj360/cliptomac-mac#install-from-source">macOS install guide ↗</a>
+          <a class="button quiet" href="https://github.com/vedraj360/cliptomac-android#install-from-source">Android install guide ↗</a>
+        </div>
+      </div>
+      <ol>
+        <li><div><h3>Build and open the Mac app</h3><p>Install the Xcode Command Line Tools, run <code>./build.sh</code> in the Mac repo, and open the app bundle at the printed path. Move the bundle to Applications if you want to keep it there.</p></div></li>
+        <li><div><h3>Install the Android app</h3><p>Open the Android project in Android Studio and run it on your phone. For command line installation, build with <code>./gradlew :app:assembleDebug</code>, then install the debug APK with <code>adb install -r app/build/outputs/apk/debug/app-debug.apk</code>.</p></div></li>
+        <li><div><h3>Pair on the same network</h3><p>On the Mac, open Settings &amp; Storage → Secure Pairing. Open the pairing QR, then scan it from Pair Mac securely → Scan QR on Android. Compare the six-digit code and approve on the Mac.</p></div></li>
+        <li><div><h3>Send a test clip</h3><p>Share a link to ClipToMac from Android, then look under Received in the Mac Library. To try the reverse direction, copy some text on the Mac and select Send Clipboard.</p></div></li>
+        <li><div><h3>Choose optional features</h3><p>Enable copy detection and display over other apps for the Android overlay. For alerts, grant Android notification access, choose the apps to forward, then enable forwarding and choose an alert style on the Mac.</p></div></li>
+      </ol>
+    </section>
+
+    <section id="faq" class="section faq">
+      <div><p class="eyebrow">FAQ</p><h2>Common questions</h2></div>
+      <div>
+        <details><summary>Can I install without building?</summary><p>Check Downloads for installable releases. The source guides below Downloads cover building either app today.</p></details>
+        <details><summary>Why can’t Android find my Mac?</summary><p>Keep ClipToMac open on the Mac and check that both devices are on the same network. Guest Wi-Fi can isolate devices. If macOS asks for local network access, allow ClipToMac to connect.</p></details>
+        <details><summary>What if the pairing QR expires?</summary><p>Open a fresh pairing QR on the Mac and scan it again. Compare the six-digit code before approving.</p></details>
+        <details><summary>Which permissions does the Android app need?</summary><p>Camera access is used to scan a pairing QR. The copy overlay uses accessibility and display-over-other-apps access. Notification forwarding uses notification access. You can share clips manually without enabling the overlay or forwarding.</p></details>
+        <details><summary>Why didn’t a forwarded alert show a banner?</summary><p>Check app selection and forwarding on both devices. For macOS notifications, also check ClipToMac’s notification permissions, banner style, and the active Focus. The Library keeps recent forwarded alerts.</p></details>
+        <details><summary>Why are Reply and Mark as read missing for some alerts?</summary><p>ClipToMac only offers actions that the Android notification supports. In macOS Notification Center, some actions may be under Options.</p></details>
+        <details><summary>Can I answer calls or mirror my screen today?</summary><p>Call controls and screen mirroring are on the roadmap.</p></details>
+        <details><summary>Do transfers use the cloud?</summary><p>Transfers go directly between paired devices on your local network using pinned HTTPS.</p></details>
+        <details><summary>Does automatic copy detection work in every Android app?</summary><p>Android and the source app can limit copy detection. Use the Android Share menu if a copy is missed.</p></details>
+        <details><summary>Where do my phone notifications go?</summary><p>Choose native macOS notifications for Notification Center and Focus, or custom banners for the source app icon and inline controls. The Mac Library keeps the latest 50 forwarded alerts locally. You can clear them there.</p></details>
+        <details><summary>Is notification mirroring optional?</summary><p>Yes. Enable notification access on Android and choose which apps can forward alerts. You can turn forwarding off at any time.</p></details>
+      </div>
+    </section>
+
+    <section id="roadmap" class="section">
+      <p class="eyebrow">Roadmap</p>
+      <h2>What’s next for ClipToMac</h2>
+      <p>These features are on the roadmap. They aren’t available in the current builds.</p>
+      <dl class="feature-grid">
+        <div><dt>Android screen mirroring</dt><dd>View your Android screen on your Mac and start or stop sharing when you need it.</dd></div>
+        <div><dt>Phone call controls</dt><dd>See incoming calls on Mac and answer, decline, or end them when the phone supports those controls.</dd></div>
+        <div><dt>Connect and disconnect</dt><dd>See which paired phones are online. Disconnect a phone temporarily and reconnect later without pairing again.</dd></div>
+        <div><dt>More reliable copy detection</dt><dd>Improve copy detection across Android apps and make manual sharing easier when Android limits automatic detection.</dd></div>
+        <div><dt>More notification controls</dt><dd>Explore per-conversation filters and more actions for forwarded alerts.</dd></div>
+      </dl>
+    </section>
+
+    <section id="contribute" class="section contribute">
+      <p class="eyebrow">Project</p>
+      <h2>Contribute on GitHub</h2>
+      <p>Report a bug, suggest a feature, or open a pull request in either repository.</p>
+      <div class="setup-links">
+        <a class="button quiet" href="https://github.com/vedraj360/cliptomac-android/issues">Android issues ↗</a>
+        <a class="button quiet" href="https://github.com/vedraj360/cliptomac-mac/issues">Mac issues ↗</a>
+      </div>
+      <p class="license"><a href="https://github.com/vedraj360/cliptomac-mac/blob/main/LICENSE">Free for noncommercial use.</a> Commercial use requires separate permission.</p>
+    </section>
+  </main>
+  <footer class="shell"><span>ClipToMac · Android and macOS</span><a href="#">Back to top ↑</a></footer>
+</body>
+</html>
