@@ -72,4 +72,4 @@ Brand icon notices are in [Assets/BrandIcons](Assets/BrandIcons/LICENSE.md).
 
 ## Website
 
-The static product site lives in [site/](site/). See its [publishing guide](site/README.md) for GitHub Pages setup.
+See features, screenshots, and installation instructions on the [ClipToMac website](https://vedraj360.github.io/cliptomac-mac/).
