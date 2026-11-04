@@ -79,7 +79,7 @@ p, figcaption, footer { color: var(--muted); }
 }
 
 .product-shot { margin: 0; }
-.product-shot img { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 10px; }
+.product-shot img, .product-shot video { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 10px; }
 figcaption { margin-top: .6rem; font-size: .85rem; }
 figcaption span { display: block; color: var(--ink); font-weight: 650; }
 
