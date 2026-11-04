@@ -18,6 +18,11 @@ import Darwin
         precondition(!String(decoding: browser, as: UTF8.self).contains("Access-Control-Allow-Origin"))
         let invalidPair = try await requestAsync("POST /pair/request HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2\r\n\r\n{}")
         precondition(status(invalidPair) == 400, "Malformed pairing accepted")
+        let started = ProcessInfo.processInfo.systemUptime
+        let unauthorizedUpload = try await requestAsync(
+            "POST /transfer HTTP/1.1\r\nHost: localhost\r\nContent-Length: 1024\r\n\r\n")
+        precondition(status(unauthorizedUpload) == 401, "Upload body was read before authentication")
+        precondition(ProcessInfo.processInfo.systemUptime - started < 2, "Upload rejection waited for the body")
         let invalidPing = try await requestAsync("GET /ping HTTP/1.1\r\nHost: localhost\r\nX-ClipToMac-Token: invalid-token\r\n\r\n")
         precondition(status(invalidPing) == 401, "Revoked/invalid pairing looked connected through ping")
         let noAuth = try await requestAsync("GET /inbox HTTP/1.1\r\nHost: localhost\r\n\r\n")

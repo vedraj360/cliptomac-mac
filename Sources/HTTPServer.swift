@@ -126,7 +126,7 @@ public final class HTTPServer {
     }
   }
 
-  struct Request {
+  struct Request: Sendable {
     var method: String
     var path: String
     var headers: [String: String]
@@ -141,16 +141,68 @@ public final class HTTPServer {
       var noSigPipe: Int32 = 1
       setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
     #endif
-    guard let req = readRequest(fd) else {
+    guard let pending = readRequestHead(fd) else {
       respond(
         fd, HTTPContract.StatusCode.badRequest,
         [HTTPContract.ResponseKey.error: HTTPServerErrors.invalidRequest])
       return
     }
-    Task { @MainActor in self.route(fd, req) }
+    Task { @MainActor in
+      let request = pending.request
+      // Browser scripts are not API clients. Reject origins even when the token is valid.
+      guard request.headers[HTTPContract.Header.origin] == nil,
+        request.headers[HTTPContract.Header.fetchSite] == nil
+      else {
+        respond(
+          fd, HTTPContract.StatusCode.forbidden,
+          [HTTPContract.ResponseKey.error: HTTPServerErrors.browserRequestsForbidden])
+        return
+      }
+      if request.method == HTTPContract.Method.options {
+        respond(
+          fd, HTTPContract.StatusCode.forbidden,
+          [HTTPContract.ResponseKey.error: HTTPServerErrors.browserRequestsForbidden])
+        return
+      }
+      if pending.length > 0 {
+        let isPairing = request.method == HTTPContract.Method.post
+          && request.path == HTTPContract.Path.pairRequest
+        let isPublicProbe = request.method == HTTPContract.Method.get
+          && (request.path == HTTPContract.Path.ping || request.path == HTTPContract.Path.root)
+        if !isPairing && !isPublicProbe,
+          validDevice(request.headers[HTTPContract.Header.authenticationToken] ?? "") == nil
+        {
+          respond(
+            fd, HTTPContract.StatusCode.unauthorized,
+            [HTTPContract.ResponseKey.error: HTTPServerErrors.deviceNotPairedOrTokenInvalid])
+          return
+        }
+        let completeRequest = await withCheckedContinuation { continuation in
+          DispatchQueue.global(qos: .userInitiated).async {
+            continuation.resume(returning: Self.readRequestBody(fd, pending))
+          }
+        }
+        guard let completeRequest else {
+          respond(
+            fd, HTTPContract.StatusCode.badRequest,
+            [HTTPContract.ResponseKey.error: HTTPServerErrors.invalidRequest])
+          return
+        }
+        route(fd, completeRequest)
+      } else {
+        route(fd, request)
+      }
+    }
   }
 
-  private func readRequest(_ fd: Int32) -> Request? {
+  private struct PendingRequest: Sendable {
+    let request: Request
+    let bufferedBody: Data
+    let length: Int
+    let deadline: TimeInterval
+  }
+
+  private func readRequestHead(_ fd: Int32) -> PendingRequest? {
     let deadline = ProcessInfo.processInfo.systemUptime + HTTPContract.requestDeadlineSeconds
     var data = Data()
     let delimiter = Data("\r\n\r\n".utf8)
@@ -186,44 +238,38 @@ public final class HTTPServer {
     let path = String(parts[1]).components(separatedBy: "?")[0]
     let bodyLimit = HTTPContract.bodyLimit(for: path)
     guard let length, length >= 0, length <= bodyLimit else { return nil }
-    let bodyStart = split.upperBound
+    return PendingRequest(
+      request: Request(method: String(parts[0]), path: path, headers: headers, body: Data()),
+      bufferedBody: Data(data[split.upperBound...]), length: length, deadline: deadline)
+  }
+
+  private static func readRequestBody(_ fd: Int32, _ pending: PendingRequest) -> Request? {
+    var request = pending.request
+    var body = pending.bufferedBody
+    let length = pending.length
+    var buffer = [UInt8](repeating: 0, count: HTTPContract.maximumHeaderBytes)
     let live =
-      parts[0] == HTTPContract.Method.put && headers[HTTPContract.Header.origin] == nil
-        && headers[HTTPContract.Header.fetchSite] == nil
+      request.method == HTTPContract.Method.put
+        && request.headers[HTTPContract.Header.origin] == nil
+        && request.headers[HTTPContract.Header.fetchSite] == nil
       ? IncomingByteProgress.shared.reader(
-        token: headers[HTTPContract.Header.authenticationToken] ?? "", path: path, length: length)
+        token: request.headers[HTTPContract.Header.authenticationToken] ?? "",
+        path: request.path, length: length)
       : nil
-    live?(min(length, data.count - bodyStart))
-    while data.count - bodyStart < length {
-      guard ProcessInfo.processInfo.systemUptime < deadline else { return nil }
-      let n = recv(fd, &buffer, min(buffer.count, length - (data.count - bodyStart)), 0)
+    live?(min(length, body.count))
+    while body.count < length {
+      guard ProcessInfo.processInfo.systemUptime < pending.deadline else { return nil }
+      let n = recv(fd, &buffer, min(buffer.count, length - body.count), 0)
       guard n > 0 else { return nil }
-      data.append(contentsOf: buffer.prefix(n))
-      live?(min(length, data.count - bodyStart))
-      if data.count - bodyStart > maxBody { return nil }
+      body.append(contentsOf: buffer.prefix(n))
+      live?(body.count)
     }
-    return Request(
-      method: String(parts[0]), path: String(parts[1]).components(separatedBy: "?")[0],
-      headers: headers, body: Data(data[bodyStart..<(bodyStart + length)]))
+    request.body = Data(body.prefix(length))
+    return request
   }
 
   @MainActor private func route(_ fd: Int32, _ req: Request) {
     let token = req.headers[HTTPContract.Header.authenticationToken] ?? ""
-    // Browser scripts are not API clients. Reject origins even when the token is valid.
-    guard req.headers[HTTPContract.Header.origin] == nil,
-      req.headers[HTTPContract.Header.fetchSite] == nil
-    else {
-      respond(
-        fd, HTTPContract.StatusCode.forbidden,
-        [HTTPContract.ResponseKey.error: HTTPServerErrors.browserRequestsForbidden])
-      return
-    }
-    if req.method == HTTPContract.Method.options {
-      respond(
-        fd, HTTPContract.StatusCode.forbidden,
-        [HTTPContract.ResponseKey.error: HTTPServerErrors.browserRequestsForbidden])
-      return
-    }
     if req.method == HTTPContract.Method.get
       && (req.path == HTTPContract.Path.ping || req.path == HTTPContract.Path.root)
     {
