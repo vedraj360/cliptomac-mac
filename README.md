@@ -2,7 +2,13 @@
 
 ClipToMac pairs a Mac with an Android phone so you can move text, links, images, and files over your local network. The Mac library lets you search clips and pin items. You can also opt in to mirror Android notifications from selected apps.
 
-[Companion app for Android](https://github.com/vedraj360/cliptomac-android) · [Website source](https://github.com/vedraj360/cliptomac-mac/tree/main/site)
+[Companion app for Android](https://github.com/vedraj360/cliptomac-android) · [Website](https://vedraj360.github.io/cliptomac-mac/)
+
+## Screenshots
+
+![ClipToMac Mac Library with clip history, search, and filters](site/assets/mac-library.png)
+
+<img src="site/assets/mac-menu.png" width="420" alt="ClipToMac menu bar panel with connection status and send controls">
 
 ## Install from source
 
