@@ -10,9 +10,9 @@ struct SecurePairingView: View {
         store.connectionState() == .securePairingRequired
           ? "Secure pairing required"
           : (store.connectionState() == .unpaired ? "Pair your phone" : "Phone pairing")
-      ).font(.system(size: 14, weight: .semibold))
+      ).font(AppTypography.font(size: 14, weight: .semibold))
       Text(store.connectionExplanation)
-        .font(.system(size: 11)).foregroundStyle(.secondary).lineSpacing(1).fixedSize(
+        .font(AppTypography.font(size: 11)).foregroundStyle(.secondary).lineSpacing(1).fixedSize(
           horizontal: false, vertical: true)
       if let payload = pairing.payload {
         PairingQRImage(payload: payload).equatable()
@@ -21,7 +21,7 @@ struct SecurePairingView: View {
             format: "Expires in %d:%02d", pairing.remainingSeconds / 60,
             pairing.remainingSeconds % 60), systemImage: "timer"
         )
-        .font(.system(size: 12, weight: .semibold)).monospacedDigit()
+        .font(AppTypography.font(size: 12, weight: .semibold)).monospacedDigit()
         .foregroundStyle(pairing.remainingSeconds <= 15 ? Color.orange : Color.primary)
         HStack {
           Button("Copy pairing code") {
@@ -33,14 +33,14 @@ struct SecurePairingView: View {
           }
           Spacer()
           Button("Cancel") { pairing.close() }
-        }.font(.system(size: 11))
+        }.font(AppTypography.font(size: 11))
       } else {
         if pairing.expired {
           Label("QR expired", systemImage: "clock.badge.exclamationmark").font(
-            .system(size: 13, weight: .semibold)
+            AppTypography.font(size: 13, weight: .semibold)
           ).foregroundStyle(.orange)
           Text("Generate a new QR to continue pairing. The previous code no longer works.").font(
-            .system(size: 12)
+            AppTypography.font(size: 12)
           ).foregroundStyle(.secondary)
         }
         Button(
@@ -53,7 +53,7 @@ struct SecurePairingView: View {
           pairing.open(host: store.localIP, port: store.port)
         }.buttonStyle(GraphiteButtonStyle())
       }
-      if let error = pairing.error { Text(error).font(.system(size: 11)).foregroundStyle(.red) }
+      if let error = pairing.error { Text(error).font(AppTypography.font(size: 11)).foregroundStyle(.red) }
     }
   }
 }

@@ -43,18 +43,18 @@ struct LibraryClipRow: View {
 
   private var metadata: some View {
     HStack(spacing: 7) {
-      Text(clip.appName).font(.system(size: 12, weight: .medium))
+      Text(clip.appName).font(AppTypography.font(size: 12, weight: .medium))
       Text(clip.direction.uppercased())
-        .font(.system(size: 8, weight: .semibold))
+        .font(AppTypography.font(size: 8, weight: .semibold))
         .tracking(1)
         .foregroundStyle(.secondary)
       Spacer()
       if clip.repeatCount > 1 {
         Text("×\(clip.repeatCount)")
-          .font(.system(size: 10, weight: .medium))
+          .font(AppTypography.font(size: 10, weight: .medium))
           .foregroundStyle(.secondary)
       }
-      Text(clip.relativeTime).font(.system(size: 10)).foregroundStyle(.secondary)
+      Text(clip.relativeTime).font(AppTypography.font(size: 10)).foregroundStyle(.secondary)
       Button(action: onTogglePin) {
         Image(systemName: clip.isPinned ? "pin.fill" : "pin")
           .foregroundStyle(clip.isPinned ? .primary : .secondary)
@@ -78,7 +78,7 @@ struct LibraryClipRow: View {
 
     if clip.kind == .text {
       Text(clip.text)
-        .font(.system(size: 13))
+        .font(AppTypography.font(size: 13))
         .lineSpacing(3)
         .lineLimit(4)
         .textSelection(.enabled)
@@ -87,9 +87,9 @@ struct LibraryClipRow: View {
         clip.attachmentName ?? clip.kind.rawValue,
         systemImage: clip.kind == .image ? "photo" : "doc"
       )
-      .font(.system(size: 13))
+      .font(AppTypography.font(size: 13))
       if let path = clip.attachmentPath {
-        Text(path).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+        Text(path).font(AppTypography.font(size: 10)).foregroundStyle(.secondary).lineLimit(1)
       }
     }
   }
@@ -127,7 +127,7 @@ struct LibraryClipRow: View {
       .buttonStyle(.plain)
       .help("Delete on this Mac")
     }
-    .font(.system(size: 11, weight: .medium))
+    .font(AppTypography.font(size: 11, weight: .medium))
   }
 
   private func dragProvider() -> NSItemProvider {

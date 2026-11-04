@@ -9,6 +9,8 @@ public struct PairedDevice: Identifiable, Codable, Equatable {
     public static let shared = ClipStore()
     public var pairedDevices: [PairedDevice] = []
     public var phoneNotificationRelayEnabled = false
+    var showSourceAppBanners = false
+    func playReceiveCue() {}
     public var hasPairedDevices: Bool { !pairedDevices.isEmpty }
     public var pairedDeviceName: String { pairedDevices.map(\.name).joined(separator: ", ") }
     public let attachmentDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("ClipToMac-transfer-test-attachments-\(UUID().uuidString)")

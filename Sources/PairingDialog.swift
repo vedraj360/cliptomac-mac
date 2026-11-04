@@ -20,7 +20,7 @@ enum PairingDialog {
       rootView: PairingDialogContent(deviceName: deviceName, code: code) { accepted in
         NSApp.stopModal(withCode: accepted ? .OK : .cancel)
         panel.orderOut(nil)
-      })
+      }.appTypography())
     panel.center()
     NSApp.activate(ignoringOtherApps: true)
     panel.makeKeyAndOrderFront(nil)
@@ -50,19 +50,19 @@ private struct PairingDialogContent: View {
       HStack {
         Image(systemName: "iphone").font(.system(size: 23, weight: .light))
         Spacer()
-        Text("CLIPTOMAC").font(.system(size: 9, weight: .semibold)).tracking(2).foregroundStyle(
+        Text("CLIPTOMAC").font(AppTypography.font(size: 9, weight: .semibold)).tracking(2).foregroundStyle(
           .secondary)
       }
       VStack(alignment: .leading, spacing: 8) {
-        Text("Connect your phone").font(.system(size: 23, weight: .semibold))
+        Text("Connect your phone").font(AppTypography.heading(size: 23))
         Text("\(deviceName) wants to send clips to this Mac.")
-          .font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2)
+          .font(AppTypography.font(size: 12)).foregroundStyle(.secondary).lineLimit(2)
       }
       HStack {
         VStack(alignment: .leading, spacing: 6) {
-          Text("VERIFICATION CODE").font(.system(size: 8, weight: .semibold)).tracking(1.5)
+          Text("VERIFICATION CODE").font(AppTypography.font(size: 8, weight: .semibold)).tracking(1.5)
             .foregroundStyle(.secondary)
-          Text(code).font(.system(size: 28, weight: .medium, design: .monospaced)).tracking(6)
+          Text(code).font(AppTypography.font(size: 28, weight: .medium)).tracking(6)
         }
         Spacer()
       }

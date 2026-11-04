@@ -2,54 +2,56 @@ import Foundation
 
 /** Durable files and attachment-path repairs used by the observable library store. */
 final class ClipHistoryFileStore {
-    let historyURL: URL
-    private let seenTransferIDsURL: URL
+    private let databaseURL: URL
+    private let database: ClipHistoryDatabase?
 
     init(historyURL: URL, seenTransferIDsURL: URL) {
-        self.historyURL = historyURL
-        self.seenTransferIDsURL = seenTransferIDsURL
+        databaseURL = historyURL.deletingLastPathComponent().appendingPathComponent("library.sqlite3")
+        do {
+            database = try ClipHistoryDatabase(url: databaseURL, legacyHistory: historyURL, legacyReceipts: seenTransferIDsURL)
+        } catch {
+            database = nil
+            NSLog("ClipToMac: library database could not be opened or migrated")
+        }
     }
 
     func loadClips() -> [ClipItem] {
-        guard let data = try? Data(contentsOf: historyURL),
-              let clips = try? JSONDecoder().decode([ClipItem].self, from: data) else { return [] }
-        return clips
+        (try? database?.loadClips()) ?? []
     }
 
     @discardableResult
     func saveClips(_ clips: [ClipItem]) -> Bool {
+        guard let database else { return false }
         do {
-            try PrivateAppStorage.write(JSONEncoder().encode(clips), to: historyURL)
+            try database.save(clips: clips)
             return true
         } catch {
-            print("Failed to save clips: \(error)")
+            NSLog("ClipToMac: library database write failed")
             return false
         }
     }
 
     func loadSeenTransferIDs() -> Set<String> {
-        guard let data = try? Data(contentsOf: seenTransferIDsURL),
-              let ids = try? JSONDecoder().decode([String].self, from: data) else { return [] }
-        return Set(ids)
+        (try? database?.loadReceipts()) ?? []
     }
 
-    func recordSeenTransferAttempt(_ id: String, current: Set<String>) -> Set<String>? {
-        guard !id.isEmpty else { return nil }
+    func recordSeenTransferAttempt(_ id: String, current: Set<String>, clips: [ClipItem]? = nil) -> Set<String>? {
+        guard !id.isEmpty, let database else { return nil }
         guard !current.contains(id) else { return current }
         var updated = current
         updated.insert(id)
         if updated.count > 100_000 { updated = Set(updated.sorted().suffix(80_000)) }
-        guard let data = try? JSONEncoder().encode(Array(updated)) else { return nil }
         do {
-            try PrivateAppStorage.write(data, to: seenTransferIDsURL)
+            try database.save(clips: clips, receipts: updated)
             return updated
         } catch {
+            NSLog("ClipToMac: transfer receipt write failed")
             return nil
         }
     }
 
     func storageBytes(attachmentDirectory: URL) -> Int64 {
-        let historyBytes = Int64((try? historyURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+        let historyBytes = Int64((try? databaseURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
         guard let enumerator = FileManager.default.enumerator(at: attachmentDirectory, includingPropertiesForKeys: [.fileSizeKey]) else {
             return historyBytes
         }

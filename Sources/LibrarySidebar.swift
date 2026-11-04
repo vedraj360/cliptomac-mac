@@ -6,6 +6,7 @@ struct LibrarySidebar: View {
   @Binding var filter: LibraryFilter
   @Binding var settings: Bool
   @Binding var selected: Set<UUID>
+  @Binding var showsPhoneNotifications: Bool
   let collections: [String]
 
   private var apps: [KnownApp] {
@@ -51,15 +52,31 @@ struct LibrarySidebar: View {
         .padding(.vertical, 8)
       }
       Spacer(minLength: 0)
-      Button {
-        settings.toggle()
-      } label: {
-        Label("Settings & Storage", systemImage: "gearshape")
+      VStack(spacing: 4) {
+        destination("Phone Notifications", symbol: "bell", active: showsPhoneNotifications) {
+          settings = false
+          showsPhoneNotifications = true
+        }
+        destination("Settings & Storage", symbol: "gearshape", active: settings && !showsPhoneNotifications) {
+          if showsPhoneNotifications { settings = true } else { settings.toggle() }
+          showsPhoneNotifications = false
+        }
       }
-      .buttonStyle(.plain)
-      .padding(14)
+      .padding(10)
     }
     .background(.black.opacity(0.12))
+  }
+
+  private func destination(_ title: String, symbol: String, active: Bool, action: @escaping () -> Void) -> some View {
+    Button(action: action) {
+      Label(title, systemImage: symbol)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 7)
+        .contentShape(Rectangle())
+    }
+    .buttonStyle(LibrarySidebarButtonStyle(selected: active))
+    .accessibilityAddTraits(active ? .isSelected : [])
   }
 
   private var brand: some View {
@@ -69,8 +86,8 @@ struct LibrarySidebar: View {
           systemSymbolName: "doc.on.doc", accessibilityDescription: nil)!
       Image(nsImage: appIcon).resizable().frame(width: 24, height: 24)
       VStack(alignment: .leading, spacing: 2) {
-        Text("ClipToMac").font(.system(size: 14, weight: .semibold))
-        Text("LIBRARY").font(.system(size: 9, weight: .semibold)).tracking(1.4).foregroundStyle(
+        Text("ClipToMac").font(AppTypography.font(size: 14, weight: .semibold))
+        Text("LIBRARY").font(AppTypography.font(size: 9, weight: .semibold)).tracking(1.4).foregroundStyle(
           .secondary)
       }
     }
@@ -88,13 +105,14 @@ struct LibrarySidebar: View {
   }
 
   private func groupLabel(_ text: String) -> some View {
-    Text(text).font(.system(size: 9, weight: .semibold)).tracking(1.3)
+    Text(text).font(AppTypography.font(size: 9, weight: .semibold)).tracking(1.3)
       .foregroundStyle(.secondary).padding(.horizontal, 9).padding(.top, 5)
   }
 
   private func row(_ title: String, _ value: LibraryFilter, _ symbol: String) -> some View {
     Button {
       filter = value
+      showsPhoneNotifications = false
       settings = false
       selected = []
     } label: {
@@ -107,14 +125,14 @@ struct LibrarySidebar: View {
         Text(title)
         Spacer(minLength: 8)
         let count = countFor(value)
-        if count > 0 { Text("\(count)").font(.system(size: 10)).foregroundStyle(.secondary) }
+        if count > 0 { Text("\(count)").font(AppTypography.font(size: 10)).foregroundStyle(.secondary) }
       }
       .frame(maxWidth: .infinity, minHeight: 20, alignment: .leading)
       .padding(.horizontal, 9).padding(.vertical, 7)
       .contentShape(Rectangle())
     }
-    .buttonStyle(LibrarySidebarButtonStyle(selected: filter == value))
-    .accessibilityAddTraits(filter == value ? .isSelected : [])
+    .buttonStyle(LibrarySidebarButtonStyle(selected: !showsPhoneNotifications && !settings && filter == value))
+    .accessibilityAddTraits(!showsPhoneNotifications && !settings && filter == value ? .isSelected : [])
   }
 
   private func countFor(_ filter: LibraryFilter) -> Int {

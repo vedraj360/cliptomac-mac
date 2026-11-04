@@ -32,7 +32,7 @@ struct KeychainPairingVault: PairingSecretVault {
     func remove(_ reference: String) { SecItemDelete(query(reference) as CFDictionary) }
 }
 
-/// JSON stores device metadata and an opaque reference; the bearer token lives in Keychain.
+/// SQLite stores device metadata and an opaque reference; the bearer token lives in Keychain.
 final class TrustedDeviceStorage {
     private struct Record: Codable {
         let id: String; let name: String; let pairedAt: Date; let credentialRef: String; let securePairing: Bool?
@@ -45,29 +45,62 @@ final class TrustedDeviceStorage {
 
     func load() throws -> [PairedDevice] {
         do {
-            let devices = try loadRecords()
+            let devices: [PairedDevice]
+            do { devices = try loadRecords() }
+            catch PlaintextImport.required { devices = try importPlaintext() }
             loadFailed = false
             return devices
         } catch { loadFailed = true; throw error }
     }
 
     private func loadRecords() throws -> [PairedDevice] {
-        guard FileManager.default.fileExists(atPath: url.path) else { return [] }
-        let data = try Data(contentsOf: url)
-        if let records = try? JSONDecoder().decode([Record].self, from: data) {
-            var loaded: [String: (token: String, reference: String)] = [:]
-            let devices = try records.map { record -> PairedDevice in
-                let token = try vault.read(record.credentialRef)
-                loaded[record.id] = (token, record.credentialRef)
-                return PairedDevice(id: record.id, name: record.name, token: token, pairedAt: record.pairedAt, securePairing: record.securePairing)
+        let records = try storage.load([Record].self) {
+            guard FileManager.default.fileExists(atPath: url.path) else { return [] }
+            let data = try Data(contentsOf: url)
+            if let records = try? JSONDecoder().decode([Record].self, from: data) {
+                // Fail before marking the import complete if Keychain is unavailable.
+                for record in records { _ = try vault.read(record.credentialRef) }
+                return records
             }
-            references = loaded
-            return devices
+            throw PlaintextImport.required
         }
-        let legacy = try JSONDecoder().decode([PairedDevice].self, from: data)
+        let devices = try hydrate(records ?? [])
+        // Retry scrubbing old plaintext if a prior launch stopped after the database commit.
+        if let bytes = try? Data(contentsOf: url),
+           (try? JSONDecoder().decode([PairedDevice].self, from: bytes))?.contains(where: { !$0.token.isEmpty }) == true {
+            try PrivateAppStorage.write(JSONEncoder().encode(records ?? []), to: url)
+        }
+        return devices
+    }
+
+    private enum PlaintextImport: Error { case required }
+
+    private var storage: SQLiteAppState {
+        SQLiteAppState(directory: url.deletingLastPathComponent(), key: "paired-devices:" + url.lastPathComponent)
+    }
+
+    private func hydrate(_ records: [Record]) throws -> [PairedDevice] {
+        var loaded: [String: (token: String, reference: String)] = [:]
+        let devices = try records.map { record -> PairedDevice in
+            let token = try vault.read(record.credentialRef)
+            loaded[record.id] = (token, record.credentialRef)
+            return PairedDevice(id: record.id, name: record.name, token: token, pairedAt: record.pairedAt, securePairing: record.securePairing)
+        }
+        references = loaded
+        return devices
+    }
+
+    private func importPlaintext() throws -> [PairedDevice] {
+        let legacy = try JSONDecoder().decode([PairedDevice].self, from: Data(contentsOf: url))
         // Migration may be retried after a temporarily locked Keychain becomes available.
         let previousFailure = loadFailed; loadFailed = false
         do { try save(legacy) } catch { loadFailed = previousFailure; throw error }
+        let sanitized = legacy.compactMap { device -> Record? in
+            guard let reference = references[device.id]?.reference else { return nil }
+            return Record(id: device.id, name: device.name, pairedAt: device.pairedAt,
+                          credentialRef: reference, securePairing: device.securePairing)
+        }
+        try PrivateAppStorage.write(JSONEncoder().encode(sanitized), to: url)
         return legacy
     }
 
@@ -87,7 +120,7 @@ final class TrustedDeviceStorage {
                 next[device.id] = (device.token, reference)
                 return Record(id: device.id, name: device.name, pairedAt: device.pairedAt, credentialRef: reference, securePairing: device.securePairing)
             }
-            try PrivateAppStorage.write(JSONEncoder().encode(records), to: url)
+            try storage.save(records)
         } catch { created.forEach { vault.remove($0) }; throw error }
         let retained = Set(next.values.map { $0.reference })
         references.values.filter { !retained.contains($0.reference) }.forEach { vault.remove($0.reference) }

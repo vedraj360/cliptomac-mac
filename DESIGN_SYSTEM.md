@@ -5,7 +5,7 @@ This guide documents the existing ClipToMac visual language and the rules for ex
 ## Product feel
 
 - Calm, precise, and utility-first. The interface should make connection, transfer progress, and the next action immediately clear.
-- Use the dark graphite palette, restrained glass/translucent surfaces, thin subtle borders, and system typography already present in the Mac app.
+- Use the dark graphite palette, restrained glass/translucent surfaces, thin subtle borders, and bundled Oxanium typography.
 - Prefer clear hierarchy and generous spacing over decorative labels, excess gradients, or competing emphasis.
 
 ## Shared visual tokens
@@ -27,7 +27,7 @@ Connection and transfer states may use semantic green, amber, and red indicators
 
 ## Type and layout
 
-- Use native system typography on Mac. Keep heading, body, secondary, and metadata roles distinct; reserve small tracked uppercase labels for section metadata already using that pattern.
+- Use bundled Oxanium for app text across Android and Mac. Native system surfaces use their platform typography. Keep heading, body, secondary, and metadata roles distinct.
 - Use an 8-point spacing rhythm where practical: 8 for tight control gaps, 12 for related content, 16 for card/content padding, and 24 for section separation.
 - Use modest continuous rounded corners consistent with current components (roughly 6–12 pt). Avoid pill shapes for large content cards.
 - Keep interactive targets comfortable and keyboard/mouse accessible. Icon-only actions need accessibility labels and help text.

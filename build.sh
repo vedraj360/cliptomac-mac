@@ -11,6 +11,7 @@ echo "🔨 Building $APP_NAME..."
 mkdir -p "$MACOS_DIR"
 mkdir -p "$RESOURCES_DIR"
 cp "Assets/AppIcon.icns" "$RESOURCES_DIR/AppIcon.icns"
+ditto "Assets/Fonts" "$RESOURCES_DIR/Fonts"
 if [ -d "Assets/BrandIcons" ]; then
     ditto "Assets/BrandIcons" "$RESOURCES_DIR/BrandIcons"
 fi

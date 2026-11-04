@@ -6,6 +6,9 @@ struct LibrarySettingsView: View {
   @ObservedObject var store: ClipStore
   let onExportBackup: () -> Void
   let onImportBackup: () -> Void
+  @State private var confirmClear = false
+  @State private var deleteClearFiles = false
+  @State private var unpairTarget: PairedDevice?
 
   var body: some View {
     ScrollView {
@@ -14,25 +17,52 @@ struct LibrarySettingsView: View {
         deletionSection
         backupSection
         shortcutSection
+        PreferencesScreen(
+          store: store, confirmClear: $confirmClear, deleteClearFiles: $deleteClearFiles,
+          unpairTarget: $unpairTarget, embedded: true
+        )
       }
       .padding(22)
+    }
+    .sheet(isPresented: $confirmClear) {
+      AttachmentDeleteSheet(
+        count: store.clips.count,
+        hasAttachments: store.clips.contains { $0.attachmentPath != nil },
+        deleteFiles: $deleteClearFiles
+      ) {
+        for item in store.clips where item.direction == "sent" && item.deliveryState != "delivered" {
+          MacTransferService.shared.cancel(id: item.transferID)
+        }
+        store.removeClips(ids: Set(store.clips.map(\.id)), deleteFiles: deleteClearFiles)
+        confirmClear = false
+      } onCancel: {
+        confirmClear = false
+      }
+    }
+    .alert("Unpair phone?", isPresented: Binding(
+      get: { unpairTarget != nil }, set: { if !$0 { unpairTarget = nil } }
+    ), presenting: unpairTarget) { device in
+      Button("Unpair", role: .destructive) { store.unpairDevice(id: device.id) }
+      Button("Cancel", role: .cancel) {}
+    } message: { device in
+      Text("You can pair \(device.name) again from its ClipToMac app.")
     }
   }
 
   private var storageSection: some View {
     settingsSection("STORAGE") {
       Text(store.storageDirectory.path)
-        .font(.system(size: 11)).textSelection(.enabled)
+        .font(AppTypography.font(size: 11)).textSelection(.enabled)
       Text(
         "Using \(ByteCountFormatter.string(fromByteCount: store.storageBytes, countStyle: .file))"
       )
-      .font(.system(size: 12)).foregroundStyle(.secondary)
+      .font(AppTypography.font(size: 12)).foregroundStyle(.secondary)
       HStack {
         Button("Open Finder") { NSWorkspace.shared.open(store.storageDirectory) }
         Button("Choose attachment folder", action: chooseAttachmentFolder)
       }
       Text("Attachments: \(store.attachmentDirectory.path)")
-        .font(.system(size: 10)).foregroundStyle(.secondary).textSelection(.enabled)
+        .font(AppTypography.font(size: 10)).foregroundStyle(.secondary).textSelection(.enabled)
     }
   }
 
@@ -44,7 +74,7 @@ struct LibrarySettingsView: View {
       Text(
         "Only ClipToMac’s local copies are removed after Undo expires. Original files and the phone’s copies are kept."
       )
-      .font(.system(size: 11)).foregroundStyle(.secondary)
+      .font(AppTypography.font(size: 11)).foregroundStyle(.secondary)
     }
   }
 
@@ -57,7 +87,7 @@ struct LibrarySettingsView: View {
       Text(
         "Backups contain library entries and attachment files. Paired device credentials are never included."
       )
-      .font(.system(size: 11)).foregroundStyle(.secondary)
+      .font(AppTypography.font(size: 11)).foregroundStyle(.secondary)
     }
   }
 
@@ -81,7 +111,7 @@ struct LibrarySettingsView: View {
         .labelsHidden().frame(width: 100)
       }
       Text("Registered as a system hotkey; ClipToMac does not monitor keystrokes.")
-        .font(.system(size: 11)).foregroundStyle(.secondary)
+        .font(AppTypography.font(size: 11)).foregroundStyle(.secondary)
     }
   }
 
@@ -90,7 +120,7 @@ struct LibrarySettingsView: View {
     @ViewBuilder content: () -> Content
   ) -> some View {
     VStack(alignment: .leading, spacing: 12) {
-      Text(title).font(.system(size: 9, weight: .semibold)).tracking(1.4).foregroundStyle(
+      Text(title).font(AppTypography.heading(size: 10)).tracking(1.4).foregroundStyle(
         .secondary)
       content()
     }

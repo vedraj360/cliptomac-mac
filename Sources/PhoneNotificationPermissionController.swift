@@ -4,14 +4,14 @@ import UserNotifications
 /** Mediates macOS notification authorization without treating a preference as granted access. */
 @MainActor
 final class PhoneNotificationPermissionController {
-    private let preferences: UserDefaults
+    private let preferences: SQLitePreferences
     private let relayIsEnabled: () -> Bool
     private let setRelayEnabled: (Bool) -> Void
     private let setPermissionMessage: (String?) -> Void
     private let requestSettingsPrompt: () -> Void
 
     init(
-        preferences: UserDefaults,
+        preferences: SQLitePreferences,
         relayIsEnabled: @escaping () -> Bool,
         setRelayEnabled: @escaping (Bool) -> Void,
         setPermissionMessage: @escaping (String?) -> Void,
@@ -38,7 +38,7 @@ final class PhoneNotificationPermissionController {
                     UNUserNotificationCenter.current().getNotificationSettings { latest in
                         Task { @MainActor in
                             self.apply(latest)
-                            let allowed = granted && Self.alertsAllowed(latest)
+                            let allowed = granted && Self.notificationsAuthorized(latest)
                             if allowed { self.preferences.set(1, forKey: "phoneNotificationRelayConsentVersion") }
                             self.setRelayEnabled(allowed)
                             if !allowed { self.requestSettingsPrompt() }
@@ -50,10 +50,12 @@ final class PhoneNotificationPermissionController {
 
             Task { @MainActor in
                 self.apply(settings)
-                let allowed = Self.alertsAllowed(settings)
+                let allowed = Self.notificationsAuthorized(settings)
                 if allowed { self.preferences.set(1, forKey: "phoneNotificationRelayConsentVersion") }
                 self.setRelayEnabled(allowed)
-                if !allowed || settings.soundSetting != .enabled { self.requestSettingsPrompt() }
+                if !allowed || settings.alertStyle == .none || settings.soundSetting != .enabled {
+                    self.requestSettingsPrompt()
+                }
             }
         }
     }
@@ -63,7 +65,7 @@ final class PhoneNotificationPermissionController {
             Task { @MainActor in
                 guard let self else { return }
                 self.apply(settings)
-                if !Self.alertsAllowed(settings), self.relayIsEnabled() {
+                if !Self.notificationsAuthorized(settings), self.relayIsEnabled() {
                     self.setRelayEnabled(false)
                 }
             }
@@ -85,8 +87,10 @@ final class PhoneNotificationPermissionController {
     }
 
     private func apply(_ settings: UNNotificationSettings) {
-        if settings.authorizationStatus == .denied || !Self.alertsAllowed(settings) {
+        if !Self.notificationsAuthorized(settings) {
             setPermissionMessage("macOS is blocking ClipToMac alerts. Allow notifications in System Settings to forward Android notifications here.")
+        } else if settings.alertStyle == .none {
+            setPermissionMessage("ClipToMac desktop alerts are off. Enable Desktop in System Settings > Notifications > ClipToMac.")
         } else if settings.soundSetting == .disabled {
             setPermissionMessage("ClipToMac alerts are allowed, but macOS has disabled their sound. Enable sound in System Settings.")
         } else {
@@ -94,8 +98,7 @@ final class PhoneNotificationPermissionController {
         }
     }
 
-    private static func alertsAllowed(_ settings: UNNotificationSettings) -> Bool {
-        (settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional)
-            && settings.alertSetting == .enabled
+    private static func notificationsAuthorized(_ settings: UNNotificationSettings) -> Bool {
+        settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional
     }
 }

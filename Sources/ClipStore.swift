@@ -36,6 +36,9 @@ public class ClipStore: ObservableObject {
             preferences.set(phoneNotificationRelayEnabled, forKey: "phoneNotificationRelayEnabled")
         }
     }
+    @Published var showSourceAppBanners = false {
+        didSet { preferences.set(showSourceAppBanners, forKey: "showPhoneNotificationsInAppBanner") }
+    }
     @Published public var phoneNotificationPermissionMessage: String?
     @Published public var phoneNotificationSettingsPromptRequested = false
     @Published public var playSound: Bool {
@@ -94,7 +97,7 @@ public class ClipStore: ObservableObject {
     }
     
     @Published public var deleteStoredFilesByDefault = false { didSet { preferences.set(deleteStoredFilesByDefault, forKey: "deleteStoredFiles") } }
-    private let preferences: UserDefaults
+    private let preferences: SQLitePreferences
     private lazy var phoneNotificationPermissionController = PhoneNotificationPermissionController(
         preferences: preferences,
         relayIsEnabled: { [weak self] in self?.phoneNotificationRelayEnabled ?? false },
@@ -111,7 +114,12 @@ public class ClipStore: ObservableObject {
     private var seenTransferIDs = Set<String>()
     
     public init(storageDirectory: URL? = nil, preferences: UserDefaults = .standard, systemIntegration: Bool = true) {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dir = storageDirectory ?? appSupport.appendingPathComponent("ClipToMac", isDirectory: true)
+        try? PrivateAppStorage.prepare(dir)
+        let preferences = SQLitePreferences(directory: dir, legacy: preferences)
         self.preferences = preferences
+        self.showSourceAppBanners = preferences.bool(forKey: "showPhoneNotificationsInAppBanner")
         self.attachmentDeletionScheduler = AttachmentDeletionScheduler(preferences: preferences)
         self.deleteStoredFilesByDefault = preferences.bool(forKey: "deleteStoredFiles")
         self.autoCopy = preferences.object(forKey: "autoCopy") as? Bool ?? true
@@ -126,9 +134,6 @@ public class ClipStore: ObservableObject {
         self.playSound = preferences.object(forKey: "playSound") as? Bool ?? true
         self.launchAtLogin = LaunchAtLoginManager.shared.isEnabled
         
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let dir = storageDirectory ?? appSupport.appendingPathComponent("ClipToMac", isDirectory: true)
-        try? PrivateAppStorage.prepare(dir)
         self.storageURL = dir.appendingPathComponent("history.json")
         self.trustedDevicesURL = dir.appendingPathComponent("trusted_devices.json")
         self.credentialStorage = systemIntegration ? TrustedDeviceStorage(url: self.trustedDevicesURL) : nil
@@ -287,7 +292,7 @@ public class ClipStore: ObservableObject {
         }
     }
     
-    private func playReceiveCue() {
+    func playReceiveCue() {
         guard playSound, let cue = NSSound(named: "Pop")?.copy() as? NSSound else { return }
         cue.volume = 0.25
         cue.play()
@@ -309,16 +314,17 @@ public class ClipStore: ObservableObject {
         guard !id.isEmpty, let clipKind = ClipKind(rawValue: kind) else { return false }
         if seenTransferAttempt(id) { return true }
         if clips.contains(where: { $0.transferID == id }) { return persistSeenTransferAttempt(id) }
+        var updatedClips = clips
         let clean = text
         guard clipKind != .text || !clean.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         let signature = contentHash?.lowercased() ?? contentDigest(kind: clipKind, text: clean, path: attachmentPath, name: attachmentName)
         if let index = clips.firstIndex(where: { $0.kind == clipKind && $0.appName == appName && $0.direction == direction && $0.sourceDeviceId == sourceDeviceId && ($0.contentHash ?? contentDigest(kind: $0.kind, text: $0.text, path: $0.attachmentPath, name: $0.attachmentName)) == signature }) {
-            clips[index].repeatCount += 1; clips[index].updatedAt = Date(); clips[index].transferID = id
-            guard saveClips() else { return false }
-            return persistSeenTransferAttempt(id)
+            updatedClips[index].repeatCount += 1; updatedClips[index].updatedAt = Date(); updatedClips[index].transferID = id
+            return persistSeenTransferAttempt(id, clips: updatedClips)
         }
-        clips.insert(ClipItem(text: clean, appName: appName, packageName: packageName, timestamp: timestamp, kind: clipKind, mimeType: mimeType, attachmentName: attachmentName, attachmentPath: attachmentPath, sourceDeviceId: sourceDeviceId, direction: direction, transferID: id, contentHash: signature), at: 0)
-        guard saveClips(), persistSeenTransferAttempt(id) else { return false }; lastReceivedAt = Date()
+        updatedClips.insert(ClipItem(text: clean, appName: appName, packageName: packageName, timestamp: timestamp, kind: clipKind, mimeType: mimeType, attachmentName: attachmentName, attachmentPath: attachmentPath, sourceDeviceId: sourceDeviceId, direction: direction, transferID: id, contentHash: signature), at: 0)
+        guard persistSeenTransferAttempt(id, clips: updatedClips) else { return false }
+        lastReceivedAt = Date()
         if autoCopy && clipKind == .text { copyToClipboard(clips[0]) }
         playReceiveCue()
         if showNotifications { sendNotification(for: clips[0]) }
@@ -329,9 +335,10 @@ public class ClipStore: ObservableObject {
     public func seenTransferAttempt(_ id: String) -> Bool {
         seenTransferIDs.contains(id)
     }
-    private func persistSeenTransferAttempt(_ id: String) -> Bool {
-        guard let updated = historyFiles.recordSeenTransferAttempt(id, current: seenTransferIDs) else { return false }
+    private func persistSeenTransferAttempt(_ id: String, clips updatedClips: [ClipItem]? = nil) -> Bool {
+        guard let updated = historyFiles.recordSeenTransferAttempt(id, current: seenTransferIDs, clips: updatedClips) else { return false }
         seenTransferIDs = updated
+        if let updatedClips { clips = updatedClips }
         return true
     }
     private func contentDigest(kind: ClipKind, text: String, path: String?, name: String?) -> String {

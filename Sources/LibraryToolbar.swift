@@ -18,9 +18,9 @@ struct LibraryToolbar: View {
     HStack(spacing: 12) {
       VStack(alignment: .leading, spacing: 3) {
         Text(settings ? "Settings & Storage" : title)
-          .font(.system(size: 22, weight: .semibold))
+          .font(AppTypography.heading(size: 22))
         Text(settings ? "LOCAL LIBRARY" : "\(itemCount) items")
-          .font(.system(size: 9, weight: .semibold))
+          .font(AppTypography.font(size: 9, weight: .semibold))
           .tracking(1.2)
           .foregroundStyle(.secondary)
       }

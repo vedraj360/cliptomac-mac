@@ -41,7 +41,7 @@ struct SendToPhoneSection: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 9) {
       HStack(spacing: 8) {
-        Text("SEND TO PHONE").font(.system(size: 9, weight: .semibold)).tracking(1.4)
+        Text("SEND TO PHONE").font(AppTypography.font(size: 9, weight: .semibold)).tracking(1.4)
           .foregroundStyle(.secondary)
         Spacer()
         if devices.count > 1 {
@@ -59,15 +59,15 @@ struct SendToPhoneSection: View {
             }
           } label: {
             Label(selectedDevice?.name ?? "Choose phone", systemImage: "iphone")
-              .font(.system(size: 10, weight: .medium))
+              .font(AppTypography.font(size: 10, weight: .medium))
               .lineLimit(1)
           }
           .menuStyle(.borderlessButton)
         } else if let device = selectedDevice {
-          Label(device.name, systemImage: "iphone").font(.system(size: 10, weight: .medium))
+          Label(device.name, systemImage: "iphone").font(AppTypography.font(size: 10, weight: .medium))
             .foregroundStyle(.secondary).lineLimit(1)
         } else {
-          Text("Pair a phone to send").font(.system(size: 10)).foregroundStyle(.secondary)
+          Text("Pair a phone to send").font(AppTypography.font(size: 10)).foregroundStyle(.secondary)
         }
       }
 
@@ -96,7 +96,7 @@ struct SendToPhoneSection: View {
       }
 
       if let notice {
-        Text(notice).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(2)
+        Text(notice).font(AppTypography.font(size: 10)).foregroundStyle(.secondary).lineLimit(2)
       }
     }
     .padding(.horizontal, 20)
@@ -115,11 +115,11 @@ struct ClipboardSendConfirmationView: View {
     ZStack {
       Color.black.opacity(0.30).onTapGesture(perform: onCancel)
       VStack(alignment: .leading, spacing: 13) {
-        Text("SEND CLIPBOARD").font(.system(size: 9, weight: .semibold)).tracking(1.5)
+        Text("SEND CLIPBOARD").font(AppTypography.font(size: 9, weight: .semibold)).tracking(1.5)
           .foregroundStyle(.secondary)
-        Text(payload.title).font(.system(size: 16, weight: .semibold)).lineLimit(2)
+        Text(payload.title).font(AppTypography.font(size: 16, weight: .semibold)).lineLimit(2)
         Text(payload.preview.isEmpty ? "The clipboard is empty." : payload.preview)
-          .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(5).textSelection(.enabled)
+          .font(AppTypography.font(size: 11)).foregroundStyle(.secondary).lineLimit(5).textSelection(.enabled)
         HStack {
           Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)
           Spacer()

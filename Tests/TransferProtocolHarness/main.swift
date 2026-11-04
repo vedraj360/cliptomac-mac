@@ -5,6 +5,10 @@ import Darwin
 @main struct Harness {
     static let port: UInt16 = 15768
     @MainActor static func main() async throws {
+        let foreground = PhoneNotificationRelay.foregroundPresentation(for: PhoneNotificationRelay.replyActionID)
+        precondition(foreground.contains([.banner, .list, .sound]), "Forwarded notifications lost foreground presentation")
+        precondition(PhoneNotificationRelay.foregroundPresentation(for: "").isEmpty, "Unrelated notification was presented")
+        print("PASS forwarded notification foreground presentation")
         let store = ClipStore.shared
         let first = PairedDevice(id: "test-a", name: "Test A", token: "token-a")
         let second = PairedDevice(id: "test-b", name: "Test B", token: "token-b")
@@ -91,6 +95,16 @@ import Darwin
         let afterAck = try await requestAsync("GET /inbox HTTP/1.1\r\nHost: localhost\r\nX-ClipToMac-Token: token-a\r\n\r\n")
         let jsonAfterAck = try JSONSerialization.jsonObject(with: body(afterAck)) as! [[String: Any]]
         precondition(jsonAfterAck.isEmpty, "ack did not durably clear inbox")
+        let resendID = try await MacTransferService.shared.sendFile(
+            source, to: first, attachmentName: "Original photo.jpg", mimeType: "image/jpeg")
+        precondition(resendID != transferID, "Resend reused an acknowledged transfer ID")
+        let resendListing = try await requestAsync("GET /inbox HTTP/1.1\r\nHost: localhost\r\nX-ClipToMac-Token: token-a\r\n\r\n")
+        let resendItems = try JSONSerialization.jsonObject(with: body(resendListing)) as! [[String: Any]]
+        precondition(resendItems.first?["name"] as? String == "Original photo.jpg")
+        precondition(resendItems.first?["mimeType"] as? String == "image/jpeg")
+        precondition(MacTransferService.shared.acknowledge(ids: [resendID], token: first.token))
+        print("PASS file resend preserves the original filename and MIME type")
+
         let waiter = Task { try await requestAsync("GET /inbox/wait HTTP/1.1\r\nHost: localhost\r\nX-ClipToMac-Token: token-a\r\n\r\n") }
         try await Task.sleep(nanoseconds: 250_000_000)
         let secondWaiter = Task { try await requestAsync("GET /inbox/wait HTTP/1.1\r\nHost: localhost\r\nX-ClipToMac-Token: token-a\r\n\r\n") }

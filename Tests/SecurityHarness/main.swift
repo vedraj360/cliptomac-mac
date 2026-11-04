@@ -23,6 +23,19 @@ func check(_ condition: @autoclosure () throws -> Bool, _ message: String = "Sec
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("ClipToMac-security-test-" + UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         try PrivateAppStorage.prepare(root)
+        let legacyState = root.appendingPathComponent("legacy-state.json")
+        let state = SQLiteAppState(directory: root, key: "fixture")
+        try Data("broken".utf8).write(to: legacyState)
+        do {
+            _ = try state.loadJSON([String].self, from: legacyState)
+            preconditionFailure("Corrupt legacy state was accepted")
+        } catch {}
+        try JSONEncoder().encode(["original"]).write(to: legacyState)
+        try check(try state.loadJSON([String].self, from: legacyState) == ["original"])
+        try state.save([String]())
+        try check(try state.loadJSON([String].self, from: legacyState) == [])
+        try check(try JSONDecoder().decode([String].self, from: Data(contentsOf: legacyState)) == ["original"])
+        print("PASS SQLite snapshots retry failed imports and do not replay cleared legacy data")
         let url = root.appendingPathComponent("trusted_devices.json")
         let device = PairedDevice(id: "phone", name: "Phone", token: "fixture-secret")
         try JSONEncoder().encode([device]).write(to: url)

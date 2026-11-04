@@ -2,10 +2,10 @@ import Foundation
 
 /** Defers local attachment deletion until the library's Undo window has ended. */
 final class AttachmentDeletionScheduler {
-    private let preferences: UserDefaults
+    private let preferences: SQLitePreferences
     private let preferenceKey = "pendingAttachmentDeletions"
 
-    init(preferences: UserDefaults) {
+    init(preferences: SQLitePreferences) {
         self.preferences = preferences
     }
 

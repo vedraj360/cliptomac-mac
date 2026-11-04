@@ -8,6 +8,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     public static weak var shared: AppDelegate?
     public private(set) var libraryWindow: NSWindow?
     private var phoneNotificationDetailWindow: NSWindow?
+    private let libraryNavigation = LibraryNavigation()
     private var statusItem: NSStatusItem!
     private var panel: GlassMenuPanel!
     private var outsideMonitor: Any?
@@ -34,7 +35,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         panel.hidesOnDeactivate = false
         panel.isFloatingPanel = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
-        panel.contentView = TransparentHostingView(rootView: ContentView())
+        panel.contentView = TransparentHostingView(rootView: ContentView().appTypography())
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
             let image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: "ClipToMac")
@@ -78,7 +79,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             window.isOpaque = false
             window.backgroundColor = .clear
             window.titlebarAppearsTransparent = false
-            window.contentView = TransparentHostingView(rootView: LibraryView())
+            window.contentView = TransparentHostingView(rootView: LibraryView(navigation: libraryNavigation).appTypography())
             window.center()
             libraryWindow = window
         }
@@ -86,9 +87,16 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         libraryWindow?.makeKeyAndOrderFront(nil)
     }
 
-    public func showPhoneNotificationDetail(appName: String, title: String, body: String) {
+    func openPhoneNotificationHistory() {
+        libraryNavigation.showsPhoneNotifications = true
+        openLibrary()
+    }
+
+    public func showPhoneNotificationDetail(
+        appName: String, title: String, body: String, sendReply: ((String) -> Bool)? = nil
+    ) {
         panel?.orderOut(nil)
-        let content = TransparentHostingView(rootView: PhoneNotificationDetailView(appName: appName, title: title, bodyText: body))
+        let content = TransparentHostingView(rootView: PhoneNotificationDetailView(appName: appName, title: title, bodyText: body, sendReply: sendReply).appTypography())
         if let window = phoneNotificationDetailWindow {
             window.contentView = content
         } else {
@@ -144,6 +152,15 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 extension AppDelegate: UNUserNotificationCenterDelegate {
+    nonisolated public func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        let category = notification.request.content.categoryIdentifier
+        completionHandler(PhoneNotificationRelay.foregroundPresentation(for: category))
+    }
+
     nonisolated public func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
         Task { @MainActor [weak self] in
             guard let self else { completionHandler(); return }
@@ -157,6 +174,13 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
         let eventID = info["eventID"] as? String ?? ""
         let deviceID = info["deviceID"] as? String ?? ""
         switch response.actionIdentifier {
+        case PhoneNotificationRelay.markReadActionID:
+            if !PhoneNotificationRelay.shared.enqueueMarkRead(deviceID: deviceID, eventID: eventID) {
+                NSLog("ClipToMac: Android mark as read could not be queued")
+            }
+        case PhoneNotificationRelay.muteActionID:
+            guard let packageName = info["packageName"] as? String else { return }
+            PhoneNotificationRelay.shared.muteSource(deviceID: deviceID, packageName: packageName)
         case PhoneNotificationRelay.viewActionID:
             showPhoneNotificationDetail(
                 appName: info["appName"] as? String ?? "Android notification",
@@ -168,13 +192,22 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
             let queued = PhoneNotificationRelay.shared.enqueueReply(deviceID: deviceID, eventID: eventID, text: reply.userText)
             if !queued { NSLog("ClipToMac: Android notification reply could not be queued") }
         case UNNotificationDefaultActionIdentifier:
-            if info["showFullText"] as? Bool == true {
-                showPhoneNotificationDetail(
-                    appName: info["appName"] as? String ?? "Android notification",
-                    title: info["sourceTitle"] as? String ?? "",
-                    body: info["fullBody"] as? String ?? response.notification.request.content.body
-                )
+            guard !eventID.isEmpty, !deviceID.isEmpty else { return }
+
+            let sendReply: ((String) -> Bool)?
+            if info["canReply"] as? Bool == true {
+                sendReply = { text in
+                    PhoneNotificationRelay.shared.enqueueReply(deviceID: deviceID, eventID: eventID, text: text)
+                }
+            } else {
+                sendReply = nil
             }
+            showPhoneNotificationDetail(
+                appName: info["appName"] as? String ?? "Android notification",
+                title: info["sourceTitle"] as? String ?? "",
+                body: info["fullBody"] as? String ?? response.notification.request.content.body,
+                sendReply: sendReply
+            )
         default:
             break
         }

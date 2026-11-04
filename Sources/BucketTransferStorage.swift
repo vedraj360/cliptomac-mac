@@ -31,13 +31,29 @@ final class BucketTransferStorage: @unchecked Sendable {
     return root.appendingPathComponent(TransferVerifier.digest(Data(owner.utf8)))
       .appendingPathComponent(id)
   }
-  private func load(_ directory: URL) throws -> Receipt {
-    try JSONDecoder().decode(
-      Receipt.self, from: Data(contentsOf: directory.appendingPathComponent("receipt.json")))
+  private func storage(_ directory: URL) -> SQLiteAppState {
+    let databaseDirectory = root.lastPathComponent == "BucketTransfers" ? root.deletingLastPathComponent() : root
+    return SQLiteAppState(directory: databaseDirectory,
+                          key: "bucket:" + directory.deletingLastPathComponent().lastPathComponent + "/" + directory.lastPathComponent)
   }
+
+  private func savedReceipt(_ directory: URL) throws -> Receipt? {
+    guard FileManager.default.fileExists(atPath: directory.path) else { return nil }
+    return try storage(directory).loadJSON(Receipt.self, from: directory.appendingPathComponent("receipt.json"))
+  }
+
+  private func load(_ directory: URL) throws -> Receipt {
+    guard let receipt = try savedReceipt(directory) else { throw CocoaError(.fileReadNoSuchFile) }
+    return receipt
+  }
+
   private func save(_ receipt: Receipt, _ directory: URL) throws {
-    try JSONEncoder().encode(receipt).write(
-      to: directory.appendingPathComponent("receipt.json"), options: .atomic)
+    try storage(directory).save(receipt)
+  }
+
+  private func remove(_ directory: URL) throws {
+    try FileManager.default.removeItem(at: directory)
+    try storage(directory).remove()
   }
 
   func start(_ manifest: TransferManifest, owner: String) throws -> [String: Any] {
@@ -45,9 +61,7 @@ final class BucketTransferStorage: @unchecked Sendable {
     lock.lock()
     defer { lock.unlock() }
     let directory = try directory(owner, manifest.transferId)
-    if FileManager.default.fileExists(atPath: directory.appendingPathComponent("receipt.json").path)
-    {
-      let receipt = try load(directory)
+    if let receipt = try savedReceipt(directory) {
       guard receipt.manifest == manifest else {
         throw BucketError.invalid(TransferErrors.transferIdentifierConflict)
       }
@@ -172,7 +186,7 @@ final class BucketTransferStorage: @unchecked Sendable {
     let folder = try directory(owner, id)
     guard FileManager.default.fileExists(atPath: folder.path), try load(folder).finalPath != nil
     else { return }
-    try FileManager.default.removeItem(at: folder)
+    try remove(folder)
     let parent = folder.deletingLastPathComponent()
     if (try? FileManager.default.contentsOfDirectory(atPath: parent.path).isEmpty) == true {
       try? FileManager.default.removeItem(at: parent)
@@ -205,7 +219,7 @@ final class BucketTransferStorage: @unchecked Sendable {
           (receipt.finalPath != nil && isCommitted(scopedID))
             || (receipt.finalPath == nil && isCancelled(scopedID))
         else { continue }
-        try? manager.removeItem(at: folder)
+        try? remove(folder)
       }
       if (try? manager.contentsOfDirectory(atPath: owner.path).isEmpty) == true {
         try? manager.removeItem(at: owner)
@@ -217,9 +231,9 @@ final class BucketTransferStorage: @unchecked Sendable {
     lock.lock()
     defer { lock.unlock() }
     let directory = try directory(owner, id)
-    if let receipt = try? load(directory), receipt.finalPath != nil { return }
+    if let receipt = try savedReceipt(directory), receipt.finalPath != nil { return }
     if FileManager.default.fileExists(atPath: directory.path) {
-      try FileManager.default.removeItem(at: directory)
+      try remove(directory)
     }
   }
 }

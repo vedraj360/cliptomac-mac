@@ -59,7 +59,8 @@ public final class MacTransferService: ObservableObject {
       }
     }
   }
-  private let fileURL: URL
+  private let storage: SQLiteAppState
+  private let loadFailed: Bool
 
   init() {
     #if CLIPTOMAC_TRANSFER_TEST
@@ -70,11 +71,18 @@ public final class MacTransferService: ObservableObject {
         for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent(
           "ClipToMac", isDirectory: true)
     #endif
-    try? FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
-    fileURL = support.appendingPathComponent("transfer-inbox.json")
-    if let data = try? Data(contentsOf: fileURL),
-      let saved = try? JSONDecoder().decode([OutboundRecord].self, from: data)
-    {
+    try? FileManager.default.createDirectory(at: support, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+    storage = SQLiteAppState(directory: support, key: "transfer-inbox")
+    let savedRecords: [OutboundRecord]?
+    do {
+      savedRecords = try storage.loadJSON([OutboundRecord].self, from: support.appendingPathComponent("transfer-inbox.json"))
+      loadFailed = false
+    } catch {
+      savedRecords = nil
+      loadFailed = true
+      NSLog("ClipToMac: transfer inbox could not be loaded")
+    }
+    if let saved = savedRecords {
       records = saved
       outboundItems = saved.map { record in
         FileTransferStatus(
@@ -120,7 +128,9 @@ public final class MacTransferService: ObservableObject {
   }
 
   @discardableResult
-  public func sendFile(_ url: URL, to device: PairedDevice) async throws -> String {
+  public func sendFile(
+    _ url: URL, to device: PairedDevice, attachmentName: String? = nil, mimeType: String? = nil
+  ) async throws -> String {
     guard
       ClipStore.shared.pairedDevices.contains(where: {
         $0.securePairing == true && $0.id == device.id && $0.token == device.token
@@ -137,10 +147,10 @@ public final class MacTransferService: ObservableObject {
       return pending.transferId
     }
     let id = UUID().uuidString
-    let mime = values.contentType?.preferredMIMEType ?? "application/octet-stream"
-    let name = url.lastPathComponent
+    let mime = mimeType ?? values.contentType?.preferredMIMEType ?? "application/octet-stream"
+    let name = attachmentName ?? url.lastPathComponent
     let copied = ClipStore.shared.attachmentDirectory.appendingPathComponent(
-      UUID().uuidString + "." + String(url.pathExtension.prefix(12)))
+      UUID().uuidString + "." + String(URL(fileURLWithPath: name).pathExtension.prefix(12)))
     try FileManager.default.createDirectory(
       at: ClipStore.shared.attachmentDirectory, withIntermediateDirectories: true)
     try await Task.detached {
@@ -452,8 +462,8 @@ public final class MacTransferService: ObservableObject {
   }
   private func persist() { try? persistThrowing() }
   private func persistThrowing() throws {
-    let data = try JSONEncoder().encode(records)
-    try PrivateAppStorage.write(data, to: fileURL)
+    guard !loadFailed else { throw CocoaError(.fileReadUnknown) }
+    try storage.save(records)
   }
   private static func sha256(_ data: Data) -> String {
     SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()

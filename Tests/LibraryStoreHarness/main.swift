@@ -44,8 +44,14 @@ import AppKit
         let oldID = UUID()
         let legacy: [[String: Any]] = [["id":oldID.uuidString,"text":"old text","appName":"Brave","packageName":"com.brave.browser","timestamp":0]]
         try JSONSerialization.data(withJSONObject: legacy).write(to: root.appendingPathComponent("history.json"))
+        let legacyHistory = root.appendingPathComponent("history.json")
+        let legacyReceipts = root.appendingPathComponent("seen_transfer_ids.json")
+        let originalHistory = try Data(contentsOf: legacyHistory)
+        let originalReceipts = try JSONEncoder().encode(["legacy-receipt"])
+        try originalReceipts.write(to: legacyReceipts)
         let store = ClipStore(storageDirectory: root, preferences: prefs, systemIntegration: false)
         precondition(store.clips.count == 1 && store.clips[0].kind == .text && store.clips[0].id == oldID, "legacy migration lost a clip")
+        precondition(store.seenTransferAttempt("legacy-receipt"))
         precondition(store.clips[0].sourceApp == .brave, "source app resolution failed")
         func receive(_ id: String, _ text: String) -> Bool { store.addTransferredItem(id:id,text:text,appName:"X",packageName:"com.twitter.android",timestamp:Date(),kind:"text",sourceDeviceId:"phone") }
         precondition(receive("attempt-1", " preserve spaces "))
@@ -83,6 +89,24 @@ import AppKit
         precondition(filesBeforeReimport == filesAfterReimport, "backup reimport copied duplicate attachments")
         let reloaded=ClipStore(storageDirectory:root,preferences:prefs,systemIntegration:false)
         precondition(reloaded.seenTransferAttempt("attempt-1") && reloaded.clips.count == 3)
+        precondition(reloaded.seenTransferAttempt("legacy-receipt"))
+        let preservedHistory = try Data(contentsOf: legacyHistory)
+        let preservedReceipts = try Data(contentsOf: legacyReceipts)
+        precondition(preservedHistory == originalHistory && preservedReceipts == originalReceipts)
+        let reopenedDatabase = try ClipHistoryDatabase(
+            url: root.appendingPathComponent("library.sqlite3"),
+            legacyHistory: legacyHistory, legacyReceipts: legacyReceipts
+        )
+        let persistedClips = try reopenedDatabase.loadClips()
+        let persistedReceipts = try reopenedDatabase.loadReceipts()
+        do {
+            try reopenedDatabase.save(clips: [persistedClips[0], persistedClips[0]], receipts: ["rejected"])
+            preconditionFailure("Duplicate clip IDs unexpectedly committed")
+        } catch {}
+        let clipsAfterFailure = try reopenedDatabase.loadClips()
+        let receiptsAfterFailure = try reopenedDatabase.loadReceipts()
+        precondition(clipsAfterFailure == persistedClips && receiptsAfterFailure == persistedReceipts)
+        print("PASS SQLite import preserves legacy files and rolls back rejected writes")
         let localCopy = URL(fileURLWithPath: attachment.attachmentPath!)
         restored.removeClips(ids: [attachment.id], deleteFiles: true)
         restored.undoDelete()

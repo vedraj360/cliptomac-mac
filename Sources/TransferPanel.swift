@@ -9,12 +9,12 @@ struct TransferPanel: View {
     }.sorted { $0.createdAt > $1.createdAt }
     if !active.isEmpty {
       VStack(alignment: .leading, spacing: 10) {
-        Text("TRANSFERS · \(active.count)").font(.system(size: 9, weight: .semibold))
+        Text("TRANSFERS · \(active.count)").font(AppTypography.font(size: 9, weight: .semibold))
           .foregroundStyle(.secondary)
         ForEach(Array(active.prefix(compact ? 1 : 3))) { item in
           VStack(alignment: .leading, spacing: 5) {
             HStack {
-              Text(item.name).font(.system(size: 12, weight: .medium)).lineLimit(1).truncationMode(
+              Text(item.name).font(AppTypography.font(size: 12, weight: .medium)).lineLimit(1).truncationMode(
                 .middle)
               Spacer()
               Text(
@@ -54,7 +54,7 @@ struct TransferPanel: View {
                 Button("Cancel") { transfers.cancel(id: item.id) }
               }.buttonStyle(.bordered).controlSize(.small)
             }
-          }.font(.system(size: 10))
+          }.font(AppTypography.font(size: 10))
         }
         if let error = transfers.controlError { Text(error).foregroundStyle(.orange) }
       }.padding(compact ? 14 : 12).background(.primary.opacity(0.04))

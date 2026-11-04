@@ -40,7 +40,7 @@ public struct ContentView: View {
       }
       footer.zIndex(1)
     }
-    .font(.system(size: 13, design: .default))
+    .font(AppTypography.font(size: 13))
     .frame(width: 420, height: 620)
     .background { nativeGlass }
     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -129,11 +129,11 @@ public struct ContentView: View {
     ZStack {
       Color.black.opacity(0.28).onTapGesture(perform: cancel)
       VStack(alignment: .leading, spacing: 16) {
-        Text("CLIPTOMAC").font(.system(size: 9, weight: .semibold)).tracking(2).foregroundStyle(
+        Text("CLIPTOMAC").font(AppTypography.font(size: 9, weight: .semibold)).tracking(2).foregroundStyle(
           .secondary)
-        Text(title).font(.system(size: 20, weight: .semibold)).fixedSize(
+        Text(title).font(AppTypography.font(size: 20, weight: .semibold)).fixedSize(
           horizontal: false, vertical: true)
-        Text(message).font(.system(size: 12)).foregroundStyle(.secondary).lineSpacing(4)
+        Text(message).font(AppTypography.font(size: 12)).foregroundStyle(.secondary).lineSpacing(4)
         HStack(spacing: 10) {
           Button("Cancel", action: cancel).keyboardShortcut(.cancelAction)
           Spacer()
@@ -154,11 +154,11 @@ public struct ContentView: View {
       HStack(alignment: .center) {
         VStack(alignment: .leading, spacing: 5) {
           Text("CLIPTOMAC")
-            .font(.system(size: 9, weight: .semibold))
+            .font(AppTypography.font(size: 9, weight: .semibold))
             .tracking(2.2)
             .foregroundStyle(.secondary)
           Text(settings ? "Settings" : "Your clipboard, closer.")
-            .font(.system(size: 22, weight: .semibold))
+            .font(AppTypography.heading(size: 22))
             .tracking(-0.6)
         }
         Spacer(minLength: 10)
@@ -166,7 +166,7 @@ public struct ContentView: View {
           withAnimation(.easeInOut(duration: 0.18)) { settings.toggle() }
         } label: {
           Image(systemName: settings ? "xmark" : "slider.horizontal.3")
-            .font(.system(size: 13, weight: .medium))
+            .font(AppTypography.font(size: 13, weight: .medium))
             .frame(width: 34, height: 34)
             .background(.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 7))
         }
@@ -183,14 +183,24 @@ public struct ContentView: View {
         )
         .frame(width: 6, height: 6)
         Text(store.connectionSummary)
-          .font(.system(size: 11, weight: .medium))
+          .font(AppTypography.font(size: 11, weight: .medium))
           .lineLimit(1)
         Spacer()
+        Button {
+          AppDelegate.shared?.openPhoneNotificationHistory()
+        } label: {
+          Image(systemName: "bell")
+            .frame(width: 30, height: 28)
+            .background(.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
+        .help("Open phone notification history")
+        .accessibilityLabel("Open phone notification history")
         Button {
           AppDelegate.shared?.openLibrary()
         } label: {
           Label("Open Library", systemImage: "square.grid.2x2")
-            .font(.system(size: 11, weight: .medium))
+            .font(AppTypography.font(size: 11, weight: .medium))
             .fixedSize()
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
@@ -213,7 +223,7 @@ public struct ContentView: View {
             store.connectionState() == .unpaired ? "Pair phone" : "Pair securely",
             systemImage: "qrcode"
           )
-          .font(.system(size: 12, weight: .semibold))
+          .font(AppTypography.font(size: 12, weight: .semibold))
           .frame(maxWidth: .infinity)
         }
         .buttonStyle(GraphiteButtonStyle())
@@ -237,10 +247,10 @@ public struct ContentView: View {
   private var footer: some View {
     HStack(spacing: 6) {
       Image(systemName: "arrow.down.left").font(.system(size: 9, weight: .medium))
-      Text(store.connectionSummary).font(.system(size: 10)).help(store.connectionExplanation)
+      Text(store.connectionSummary).font(AppTypography.font(size: 10)).help(store.connectionExplanation)
       Spacer()
       Button("Quit") { NSApplication.shared.terminate(nil) }
-        .buttonStyle(.plain).font(.system(size: 10))
+        .buttonStyle(.plain).font(AppTypography.font(size: 10))
     }
     .foregroundStyle(.secondary)
     .padding(.horizontal, 20).padding(.vertical, 12)

@@ -4,7 +4,8 @@ import Foundation
 final class IncomingTransferControls: @unchecked Sendable {
   static let shared = IncomingTransferControls()
   private let lock = NSRecursiveLock()
-  private let file: URL
+  private let storage: SQLiteAppState
+  private let loadFailed: Bool
   private var states: [String: String]
   init(directory: URL? = nil) {
     #if CLIPTOMAC_TRANSFER_TEST
@@ -18,8 +19,16 @@ final class IncomingTransferControls: @unchecked Sendable {
         ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("ClipToMac")
     #endif
-    file = root.appendingPathComponent("incoming-transfer-controls.json")
-    states = (try? JSONDecoder().decode([String: String].self, from: Data(contentsOf: file))) ?? [:]
+    storage = SQLiteAppState(directory: root, key: "incoming-transfer-controls")
+    do {
+      try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+      states = try storage.loadJSON([String: String].self, from: root.appendingPathComponent("incoming-transfer-controls.json")) ?? [:]
+      loadFailed = false
+    } catch {
+      states = [:]
+      loadFailed = true
+      NSLog("ClipToMac: transfer controls could not be loaded")
+    }
   }
   func state(owner: String, id: String) -> String {
     lock.lock()
@@ -34,17 +43,18 @@ final class IncomingTransferControls: @unchecked Sendable {
   func set(owner: String, id: String, state: String) throws {
     lock.lock()
     defer { lock.unlock() }
+    guard !loadFailed else { throw CocoaError(.fileReadUnknown) }
     let key = TransferIdentity.scoped(owner: owner, id: id)
     guard states[key] != "cancelled" else { throw ControlError.cancelled }
     var updated = states
     if state == "receiving" { updated.removeValue(forKey: key) } else { updated[key] = state }
-    try PrivateAppStorage.prepare(file.deletingLastPathComponent())
-    try PrivateAppStorage.write(JSONEncoder().encode(updated), to: file)
+    try storage.save(updated)
     states = updated
   }
   func receiving<T>(owner: String, id: String, _ operation: () throws -> T) throws -> T {
     lock.lock()
     defer { lock.unlock() }
+    guard !loadFailed else { throw CocoaError(.fileReadUnknown) }
     switch state(owner: owner, id: id) {
     case "paused": throw ControlError.paused
     case "cancelled": throw ControlError.cancelled

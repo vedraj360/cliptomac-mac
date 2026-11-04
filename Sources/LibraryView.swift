@@ -2,7 +2,13 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
+@MainActor
+final class LibraryNavigation: ObservableObject {
+  @Published var showsPhoneNotifications = false
+}
+
 struct LibraryView: View {
+  @ObservedObject var navigation: LibraryNavigation
   @ObservedObject private var store = ClipStore.shared
   @ObservedObject private var transfers = MacTransferService.shared
   @State private var confirmingDelete = false
@@ -25,41 +31,17 @@ struct LibraryView: View {
     HStack(spacing: 0) {
       LibrarySidebar(
         store: store, filter: $filter, settings: $settings, selected: $selected,
-        collections: collections
+        showsPhoneNotifications: $navigation.showsPhoneNotifications, collections: collections
       )
       .frame(width: 220)
       Rectangle().fill(.primary.opacity(0.08)).frame(width: 1)
-      VStack(spacing: 0) {
-        LibraryToolbar(
-          search: $search,
-          selected: $selected,
-          selectedDevice: $selectedDevice,
-          settings: $settings,
-          title: title,
-          itemCount: visible.count,
-          visibleIDs: Set(visible.map(\.id)),
-          pairedDevices: store.pairedDevices,
-          onSendClipboard: sendClipboard(to:),
-          onSendSelected: sendSelected(to:),
-          onChooseFile: { device in
-            selectedDevice = device
-            showFilePicker = true
-          }
-        )
-        .zIndex(1)
-        Rectangle().fill(.primary.opacity(0.08)).frame(height: 1)
-        Group {
-          if settings {
-            LibrarySettingsView(
-              store: store, onExportBackup: backupExport, onImportBackup: backupImport)
-          } else {
-            contentPane
-          }
-        }
-        .clipped()
+      if navigation.showsPhoneNotifications {
+        PhoneNotificationHistoryView(relay: .shared)
+      } else {
+        libraryContent
       }
     }
-    .font(.system(size: 13))
+    .font(AppTypography.font(size: 13))
     .background(ReadableLibraryGlass())
     .tint(Color(white: 0.74))
     .frame(minWidth: 760, minHeight: 520)
@@ -96,7 +78,7 @@ struct LibraryView: View {
     .overlay(alignment: .bottomTrailing) {
       if let notice {
         HStack(spacing: 10) {
-          Text(notice).font(.system(size: 12))
+          Text(notice).font(AppTypography.font(size: 12))
           Button {
             self.notice = nil
           } label: {
@@ -151,6 +133,38 @@ struct LibraryView: View {
       return true
     }
   }
+  private var libraryContent: some View {
+    VStack(spacing: 0) {
+      LibraryToolbar(
+        search: $search,
+        selected: $selected,
+        selectedDevice: $selectedDevice,
+        settings: $settings,
+        title: title,
+        itemCount: visible.count,
+        visibleIDs: Set(visible.map(\.id)),
+        pairedDevices: store.pairedDevices,
+        onSendClipboard: sendClipboard(to:),
+        onSendSelected: sendSelected(to:),
+        onChooseFile: { device in
+          selectedDevice = device
+          showFilePicker = true
+        }
+      )
+      .zIndex(1)
+      Rectangle().fill(.primary.opacity(0.08)).frame(height: 1)
+      Group {
+        if settings {
+          LibrarySettingsView(
+            store: store, onExportBackup: backupExport, onImportBackup: backupImport)
+        } else {
+          contentPane
+        }
+      }
+      .clipped()
+    }
+  }
+
   private var title: String {
     switch filter {
     case .all: return "All Clips"
@@ -187,12 +201,12 @@ struct LibraryView: View {
       if visible.isEmpty {
         VStack(spacing: 10) {
           Image(systemName: search.isEmpty ? "doc.on.clipboard" : "magnifyingglass").font(
-            .system(size: 30, weight: .ultraLight)
+            AppTypography.font(size: 30, weight: .ultraLight)
           ).foregroundStyle(.secondary)
           Text(search.isEmpty ? "No clips here yet" : "No matches").font(
-            .system(size: 17, weight: .medium))
+            AppTypography.font(size: 17, weight: .medium))
           Text("Items explicitly sent between your paired devices appear here.").font(
-            .system(size: 12)
+            AppTypography.font(size: 12)
           ).foregroundStyle(.secondary)
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
       } else {
@@ -276,9 +290,11 @@ struct LibraryView: View {
           let id = try MacTransferService.shared.sendText(item.text, to: device)
           _ = store.recordOutbound(text: item.text, to: device, transferID: id)
         } else if let p = item.attachmentPath {
-          let id = try await MacTransferService.shared.sendFile(URL(fileURLWithPath: p), to: device)
-          _ = store.recordOutbound(
-            text: "", fileURL: URL(fileURLWithPath: p), to: device, transferID: id)
+          try await MacTransferService.shared.sendFile(
+            URL(fileURLWithPath: p), to: device, attachmentName: item.attachmentName, mimeType: item.mimeType)
+        } else {
+          notice = "This clip has no stored attachment."
+          return
         }
         notice = "Transfer queued for \(device.name)."
       } catch { notice = error.localizedDescription }
@@ -297,7 +313,7 @@ struct LibraryView: View {
   }
   private var collectionEditor: some View {
     VStack(alignment: .leading, spacing: 16) {
-      Text("Add to collection").font(.system(size: 20, weight: .semibold))
+      Text("Add to collection").font(AppTypography.font(size: 20, weight: .semibold))
       TextField("Collection name", text: $collectionName).textFieldStyle(.roundedBorder)
       if !collections.isEmpty {
         Picker("Existing", selection: $collectionName) {

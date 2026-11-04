@@ -47,7 +47,7 @@ struct RecentClipsFeed: View {
       Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
       TextField("Search clips or apps", text: $search)
         .textFieldStyle(.plain)
-        .font(.system(size: 13))
+        .font(AppTypography.font(size: 13))
       if !search.isEmpty {
         Button {
           search = ""
@@ -86,9 +86,9 @@ struct RecentClipsFeed: View {
 
   private var feedHeading: some View {
     HStack {
-      Text("RECEIVED").font(.system(size: 9, weight: .semibold)).tracking(1.5)
+      Text("RECEIVED").font(AppTypography.font(size: 9, weight: .semibold)).tracking(1.5)
       Spacer()
-      Text("\(filtered.count) \(filtered.count == 1 ? "clip" : "clips")").font(.system(size: 11))
+      Text("\(filtered.count) \(filtered.count == 1 ? "clip" : "clips")").font(AppTypography.font(size: 11))
     }
     .foregroundStyle(.secondary)
     .padding(.horizontal, 21)
@@ -100,16 +100,16 @@ struct RecentClipsFeed: View {
     VStack(spacing: 12) {
       Spacer()
       Image(systemName: search.isEmpty ? "doc.on.clipboard" : "magnifyingglass")
-        .font(.system(size: 30, weight: .ultraLight))
+        .font(AppTypography.font(size: 30, weight: .ultraLight))
         .foregroundStyle(.secondary)
       Text(search.isEmpty ? "Ready for your next idea." : "No matching clips")
-        .font(.system(size: 16, weight: .medium))
+        .font(AppTypography.font(size: 16, weight: .medium))
       Text(
         search.isEmpty
           ? "Copy text on your phone, then tap\nSend to Mac in the top overlay."
           : "Try another word or app name."
       )
-      .font(.system(size: 12))
+      .font(AppTypography.font(size: 12))
       .foregroundStyle(.secondary)
       .multilineTextAlignment(.center)
       .lineSpacing(4)
@@ -123,13 +123,13 @@ struct RecentClipsFeed: View {
     VStack(alignment: .leading, spacing: 12) {
       HStack(spacing: 7) {
         SourceAppIcon(app: clip.sourceApp, package: clip.packageName).frame(width: 22, height: 22)
-        Text(clip.appName).font(.system(size: 11, weight: .medium))
+        Text(clip.appName).font(AppTypography.font(size: 11, weight: .medium))
         Spacer()
-        Text(clip.relativeTime).font(.system(size: 10)).foregroundStyle(.secondary).help(
+        Text(clip.relativeTime).font(AppTypography.font(size: 10)).foregroundStyle(.secondary).help(
           clip.exactTime)
       }
       Text(clip.kind == .text ? clip.text : (clip.attachmentName ?? "Attachment"))
-        .font(.system(size: 13))
+        .font(AppTypography.font(size: 13))
         .lineSpacing(3)
         .lineLimit(5)
         .textSelection(.enabled)
@@ -175,7 +175,7 @@ struct RecentClipsFeed: View {
         .accessibilityLabel("Delete clip")
       }
       .buttonStyle(.plain)
-      .font(.system(size: 11, weight: .medium))
+      .font(AppTypography.font(size: 11, weight: .medium))
     }
     .padding(14)
     .background {
