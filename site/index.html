@@ -23,7 +23,7 @@
         <h1 id="hero-title">Copy on Android.<br>Pick up on Mac.</h1>
         <p>Preview what you copy on your phone, send it to your Mac, and find it again in the Library. ClipToMac also sends files both ways and forwards alerts from the Android apps you choose.</p>
         <div class="hero-actions">
-          <a class="button primary" href="#downloads">Downloads</a>
+          <a class="button primary" href="#downloads">Download Beta v1.0.0</a>
           <a href="#features">See how it works ↓</a>
         </div>
         <p class="hero-note">Android 8+ · Apple silicon Mac with macOS 13+</p>
@@ -92,10 +92,14 @@
     <section id="downloads" class="section split">
       <div><p class="eyebrow">Downloads</p><h2>Android and Mac releases</h2></div>
       <div>
-        <p>GitHub Releases is where installable builds will appear. The first downloadable builds are pending. You can build either app from source today.</p>
+        <p>Installable v1.0.0 beta releases are available for Android and Mac. Direct download links and source install guides are below.</p>
+        <div class="setup-links" style="margin-bottom: 1.5rem;">
+          <a class="button primary" href="https://github.com/vedraj360/cliptomac-mac/releases/download/v1.0.0/ClipToMac-macos-arm64.zip">Download for Mac (v1.0.0)</a>
+          <a class="button quiet" href="https://github.com/vedraj360/cliptomac-android/releases/download/v1.0.0/ClipToMac-android.apk">Download for Android (v1.0.0)</a>
+        </div>
         <dl class="feature-list">
-          <div><dt>Android APK</dt><dd>Android 8 or later. <a href="https://github.com/vedraj360/cliptomac-android/releases">Android releases ↗</a></dd></div>
-          <div><dt>Mac ZIP</dt><dd>Apple silicon with macOS 13 or later. <a href="https://github.com/vedraj360/cliptomac-mac/releases">Mac releases ↗</a></dd></div>
+          <div><dt>Mac ZIP</dt><dd>Apple silicon with macOS 13 or later. Unzip and move ClipToMac to Applications. <a href="https://github.com/vedraj360/cliptomac-mac/releases/tag/v1.0.0">Mac release notes ↗</a></dd></div>
+          <div><dt>Android APK</dt><dd>Android 8 or later. Signed standalone APK. <a href="https://github.com/vedraj360/cliptomac-android/releases/tag/v1.0.0">Android release notes ↗</a></dd></div>
         </dl>
         <p><a href="#setup">Install from source ↓</a></p>
       </div>
@@ -123,7 +127,7 @@
     <section id="faq" class="section faq">
       <div><p class="eyebrow">FAQ</p><h2>Common questions</h2></div>
       <div>
-        <details><summary>Can I install without building?</summary><p>Check Downloads for installable releases. The source guides below Downloads cover building either app today.</p></details>
+        <details><summary>Can I install without building?</summary><p>Yes. Pre-built v1.0.0 beta packages for Mac and Android are available in the <a href="#downloads">Downloads</a> section above. The source guides below in Setup cover building either app from source.</p></details>
         <details><summary>Why can’t Android find my Mac?</summary><p>Keep ClipToMac open on the Mac and check that both devices are on the same network. Guest Wi-Fi can isolate devices. If macOS asks for local network access, allow ClipToMac to connect.</p></details>
         <details><summary>What if the pairing QR expires?</summary><p>Open a fresh pairing QR on the Mac and scan it again. Compare the six-digit code before approving.</p></details>
         <details><summary>Which permissions does the Android app need?</summary><p>Camera access is used to scan a pairing QR. The copy overlay uses accessibility and display-over-other-apps access. Notification forwarding uses notification access. You can share clips manually without enabling the overlay or forwarding.</p></details>
